@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Night Shift: Extraction</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main>
+      <section id="joinPanel" class="panel">
+        <h1>Night Shift: Extraction</h1>
+        <p>Enter your username to load XP and jump in.</p>
+        <div class="join-row">
+          <input id="usernameInput" maxlength="20" placeholder="Username" />
+          <button id="joinBtn">Join</button>
+        </div>
+        <p class="hint">Open multiple tabs to simulate multiplayer.</p>
+      </section>
+
+      <section id="gamePanel" class="hidden">
+        <canvas id="gameCanvas" width="1088" height="704"></canvas>
+        <aside class="hud">
+          <h2>HUD</h2>
+          <div id="phaseInfo"></div>
+          <div id="playerInfo"></div>
+          <div id="inventoryInfo"></div>
+          <div id="gearInfo"></div>
+          <div id="teamInfo"></div>
+          <div class="instructions">
+            <h3>Controls</h3>
+            <ul>
+              <li>WASD / Arrow keys: Move</li>
+              <li>E: Auto craft/upgrade</li>
+              <li>Space: Attack (bat or slingshot)</li>
+            </ul>
+          </div>
+          <h3>Event Log</h3>
+          <ul id="events"></ul>
+        </aside>
+      </section>
+    </main>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
