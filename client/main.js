@@ -139,6 +139,18 @@ function render() {
     if (player.tagged) ctx.fillStyle = '#ffb26a';
     ctx.fillRect(player.x * TILE_SIZE - 9, player.y * TILE_SIZE - 9, 18, 18);
 
+    const dirX = player.facingX ?? 1;
+    const dirY = player.facingY ?? 0;
+    const mag = Math.hypot(dirX, dirY) || 1;
+    const tipX = player.x * TILE_SIZE + (dirX / mag) * 14;
+    const tipY = player.y * TILE_SIZE + (dirY / mag) * 14;
+    ctx.strokeStyle = isSelf ? '#004d73' : '#333';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(player.x * TILE_SIZE, player.y * TILE_SIZE);
+    ctx.lineTo(tipX, tipY);
+    ctx.stroke();
+
     ctx.fillStyle = '#10151d';
     ctx.font = '12px sans-serif';
     ctx.fillText(player.username, player.x * TILE_SIZE - 20, player.y * TILE_SIZE - 12);

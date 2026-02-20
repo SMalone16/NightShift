@@ -72,6 +72,8 @@ class Game {
       username,
       x: spawn.x,
       y: spawn.y,
+      facingX: 1,
+      facingY: 0,
       inputs: { up: false, down: false, left: false, right: false },
       wantsCraft: false,
       wantsAttack: false,
@@ -196,6 +198,8 @@ class Game {
       const mag = Math.hypot(dx, dy) || 1;
       const step = (PLAYER_SPEED * slow * dt) / mag;
       if (dx !== 0 || dy !== 0) {
+        p.facingX = dx / mag;
+        p.facingY = dy / mag;
         this.tryMovePlayer(p, p.x + dx * step, p.y + dy * step);
       }
 
@@ -303,14 +307,21 @@ class Game {
 
   handleAttack(player, now) {
     if (player.selectedWeapon === 'slingshot' && player.gear.slingshot > 0) {
+      const dirMag = Math.hypot(player.facingX, player.facingY) || 1;
+      const dirX = player.facingX / dirMag;
+      const dirY = player.facingY / dirMag;
+      const tier = player.gear.slingshot;
+      const speed = 8 + tier;
+      const ttl = 0.65 + 0.15 * tier;
+
       this.projectiles.push({
         id: this.nextProjectileId++,
         ownerId: player.id,
         x: player.x,
         y: player.y,
-        vx: 8,
-        vy: 0,
-        ttl: 0.8,
+        vx: dirX * speed,
+        vy: dirY * speed,
+        ttl,
         stun: 0.55 + 0.12 * player.gear.slingshot,
       });
       this.logEvent(`${player.username} fired slingshot.`);
@@ -483,6 +494,8 @@ class Game {
           username: p.username,
           x: p.x,
           y: p.y,
+          facingX: p.facingX,
+          facingY: p.facingY,
           inventory: p.inventory,
           gear: p.gear,
           selectedWeapon: p.selectedWeapon,
