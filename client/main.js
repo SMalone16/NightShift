@@ -1,5 +1,17 @@
 const TILE_SIZE = 32;
-const COLORS = {
+const DAY_COLORS = {
+  0: '#57b26e', // grass
+  1: '#2b6b3e', // tree
+  2: '#8a939d', // rock
+  3: '#a76f3f', // stall
+  4: '#9a8360', // path
+  5: '#67bdd9', // checkpoint
+  6: '#d1a23a', // objective
+  7: '#b4844b', // chest
+  99: '#000000', // hidden
+};
+
+const NIGHT_COLORS = {
   0: '#2f7d45', // grass
   1: '#1a4f2d', // tree
   2: '#6f7882', // rock
@@ -102,15 +114,27 @@ window.addEventListener('keyup', (e) => {
   if (e.key === 'd' || e.key === 'ArrowRight') inputState.right = false;
 });
 
+
+function getLightingMode() {
+  return snapshot?.lightingMode === 'night' ? 'night' : 'day';
+}
+
 function render() {
   if (!snapshot) return;
   const map = snapshot.map;
+  const lightingMode = getLightingMode();
+  const tileColors = lightingMode === 'night' ? NIGHT_COLORS : DAY_COLORS;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (lightingMode === 'day') {
+    ctx.fillStyle = '#b9e5ff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
 
   for (let y = 0; y < map.height; y += 1) {
     for (let x = 0; x < map.width; x += 1) {
       const tile = map.tiles[y][x];
-      ctx.fillStyle = COLORS[tile] || '#000';
+      ctx.fillStyle = tileColors[tile] || '#000';
       ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
 
       if (tile === 5) {
@@ -156,6 +180,35 @@ function render() {
     ctx.fillText(player.username, player.x * TILE_SIZE - 20, player.y * TILE_SIZE - 12);
   });
 
+  if (lightingMode === 'night') {
+    ctx.save();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const me = snapshot.players.find((p) => p.id === selfId);
+    if (me && snapshot.visionRadius) {
+      const radiusPx = snapshot.visionRadius * TILE_SIZE;
+      const gradient = ctx.createRadialGradient(
+        me.x * TILE_SIZE,
+        me.y * TILE_SIZE,
+        radiusPx * 0.25,
+        me.x * TILE_SIZE,
+        me.y * TILE_SIZE,
+        radiusPx
+      );
+      gradient.addColorStop(0, 'rgba(255, 245, 200, 0.05)');
+      gradient.addColorStop(1, 'rgba(255, 245, 200, 0.35)');
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(me.x * TILE_SIZE, me.y * TILE_SIZE, radiusPx, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+    }
+
+    ctx.restore();
+  }
+
 }
 
 function renderHud() {
@@ -163,7 +216,9 @@ function renderHud() {
   const me = snapshot.players.find((p) => p.id === selfId);
   if (!me) return;
 
-  phaseInfo.innerHTML = `<strong>Phase:</strong> ${snapshot.phase.toUpperCase()} | <strong>Time:</strong> ${snapshot.timer}s`;
+  const lightingMode = getLightingMode();
+  const phaseLabel = lightingMode === 'day' ? 'DAY' : 'NIGHT';
+  phaseInfo.innerHTML = `<strong>Cycle:</strong> ${phaseLabel} | <strong>Time:</strong> ${snapshot.timer}s`;
   playerInfo.innerHTML = `<strong>${me.username}</strong> — XP ${me.xp}, Level ${me.level}`;
   inventoryInfo.innerHTML = `
     <strong>Inventory</strong><br>
@@ -171,7 +226,8 @@ function renderHud() {
     cloth: ${me.inventory.cloth} | oil: ${me.inventory.oil} | pebbles: ${me.inventory.pebbles}
   `;
   const selectedWeaponLabel = me.selectedWeapon === 'slingshot' ? 'Slingshot' : 'Bat';
-  gearInfo.innerHTML = `<strong>Gear</strong><br>Torch T${me.gear.torch} | Bat T${me.gear.bat} | Slingshot T${me.gear.slingshot}<br><strong>Selected:</strong> ${selectedWeaponLabel} (Q to swap)`;
+  const flashlightStatus = lightingMode === 'night' ? `Active (range T${me.gear.torch})` : 'Standby (daylight)';
+  gearInfo.innerHTML = `<strong>Gear</strong><br>Torch T${me.gear.torch} | Bat T${me.gear.bat} | Slingshot T${me.gear.slingshot}<br><strong>Flashlight:</strong> ${flashlightStatus}<br><strong>Selected:</strong> ${selectedWeaponLabel} (Q to swap)`;
 
   const everyone = snapshot.players
     .map((p) => `${p.objectiveReached ? '✅' : '⬜'} ${p.username}`)

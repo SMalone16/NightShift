@@ -25,16 +25,18 @@ Then open `http://localhost:3000`.
 ## Game Loop Overview
 
 ### Phases
-1. **Gather Phase (45s)**
+1. **Day (45s)**
+   - Full map visibility for all players.
    - Collect resources from adjacent trees/rocks.
    - Step on chest tiles for random loot.
-   - Checkpoints are just walkable tiles.
+   - Checkpoints are walkable but do not provide safety.
 
-2. **Chase Phase (60s)**
-   - Enemies spawn and chase nearest non-safe player.
+2. **Night (60s)**
+   - Enemies spawn and chase the nearest non-safe player.
    - Checkpoints become safe respite areas (enemies avoid them, players there are not targeted).
    - Team objective: **all players must reach objective tile(s)** before time runs out.
-   - Win = XP reward and round reset. Fail = round reset.
+   - Visibility is masked by darkness; torch tier increases vision radius.
+   - Win = XP reward and round reset to day. Fail = round reset to day.
 
 ### Inventory + Auto-Craft
 - Materials: `wood`, `stone`, `cloth`, `oil`, `pebbles`
@@ -55,7 +57,7 @@ Recipes:
 - **Space** attack:
   - Slingshot equipped: fires a projectile (stuns enemies briefly)
   - Else bat equipped: short melee stun
-- Torch increases chase-phase vision radius via darkness overlay on client.
+- Torch increases night vision radius; daytime ignores flashlight tiers and darkness masking.
 
 ---
 
@@ -63,6 +65,7 @@ Recipes:
 - **Move:** WASD / Arrow keys
 - **Auto-craft / auto-upgrade:** E
 - **Attack:** Space
+- **Cycle behavior:** Day is bright and fully visible; night enables darkness + flashlight radius
 
 ---
 
