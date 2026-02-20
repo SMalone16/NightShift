@@ -14,13 +14,13 @@ const MAP_WIDTH = 34;
 const MAP_HEIGHT = 22;
 
 const PHASES = {
-  GATHER: 'gather',
-  CHASE: 'chase',
+  DAY: 'day',
+  NIGHT: 'night',
 };
 
 const PHASE_LENGTH_SECONDS = {
-  [PHASES.GATHER]: 45,
-  [PHASES.CHASE]: 60,
+  [PHASES.DAY]: 45,
+  [PHASES.NIGHT]: 60,
 };
 
 const RECIPES = {

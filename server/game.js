@@ -57,8 +57,8 @@ class Game {
     this.projectiles = [];
     this.nextEnemyId = 1;
     this.nextProjectileId = 1;
-    this.phase = PHASES.GATHER;
-    this.phaseTimer = PHASE_LENGTH_SECONDS[PHASES.GATHER];
+    this.phase = PHASES.DAY;
+    this.phaseTimer = PHASE_LENGTH_SECONDS[PHASES.DAY];
     this.roundStatus = 'running';
     this.events = [];
     this.lastEnemySpawnTick = 0;
@@ -125,7 +125,7 @@ class Game {
     this.updatePlayers(dt, now);
     this.updateProjectiles(dt, now);
 
-    if (this.phase === PHASES.CHASE) {
+    if (this.phase === PHASES.NIGHT) {
       this.updateEnemies(dt, now);
       this.checkObjectiveWin();
       this.checkChaseTimeout();
@@ -133,14 +133,14 @@ class Game {
   }
 
   advancePhase(now) {
-    if (this.phase === PHASES.GATHER) {
-      this.phase = PHASES.CHASE;
-      this.phaseTimer = PHASE_LENGTH_SECONDS[PHASES.CHASE];
+    if (this.phase === PHASES.DAY) {
+      this.phase = PHASES.NIGHT;
+      this.phaseTimer = PHASE_LENGTH_SECONDS[PHASES.NIGHT];
       this.spawnEnemies();
       this.players.forEach((p) => {
         p.objectiveReached = false;
       });
-      this.logEvent('Chase phase started. Get to objective together!');
+      this.logEvent('Night has fallen. Get to objective together!');
     } else {
       this.resetRound(false, now);
     }
@@ -158,8 +158,8 @@ class Game {
       this.logEvent('Round failed. Resetting camp...');
     }
 
-    this.phase = PHASES.GATHER;
-    this.phaseTimer = PHASE_LENGTH_SECONDS[PHASES.GATHER];
+    this.phase = PHASES.DAY;
+    this.phaseTimer = PHASE_LENGTH_SECONDS[PHASES.DAY];
     this.enemies = [];
     this.projectiles = [];
     this.map = generateMap();
@@ -279,7 +279,7 @@ class Game {
       }
     });
 
-    if (this.phase === PHASES.CHASE && this.map.tiles[ty][tx] === TILE.OBJECTIVE) {
+    if (this.phase === PHASES.NIGHT && this.map.tiles[ty][tx] === TILE.OBJECTIVE) {
       player.objectiveReached = true;
     }
   }
@@ -386,7 +386,7 @@ class Game {
   isPlayerSafe(player) {
     const tx = Math.round(player.x);
     const ty = Math.round(player.y);
-    return this.phase === PHASES.CHASE && this.map.tiles[ty][tx] === TILE.CHECKPOINT;
+    return this.phase === PHASES.NIGHT && this.map.tiles[ty][tx] === TILE.CHECKPOINT;
   }
 
   findNearestTarget(enemy) {
@@ -408,7 +408,7 @@ class Game {
   }
 
   checkChaseTimeout() {
-    if (this.phase === PHASES.CHASE && this.phaseTimer <= 0) {
+    if (this.phase === PHASES.NIGHT && this.phaseTimer <= 0) {
       this.resetRound(false, Date.now() / 1000);
     }
   }
@@ -424,7 +424,14 @@ class Game {
     if (this.events.length > 12) this.events.shift();
   }
 
+  getLightingMode() {
+    return this.phase === PHASES.DAY ? 'day' : 'night';
+  }
+
   getVisionRadiusForPlayer(player) {
+    if (this.getLightingMode() === 'day') {
+      return Infinity;
+    }
     return VISION_RADIUS_BASE_TILES + player.gear.torch * VISION_RADIUS_PER_TORCH_TIER;
   }
 
@@ -480,15 +487,18 @@ class Game {
   getSnapshotForPlayer(clientId) {
     const now = Date.now() / 1000;
     const player = this.players.get(clientId);
+    const lightingMode = this.getLightingMode();
+    const isNight = lightingMode === 'night';
     const visionRadius = player ? this.getVisionRadiusForPlayer(player) : 0;
-    const visibleTiles = player ? this.getVisibleTilesForPlayer(player, visionRadius) : null;
+    const visibleTiles = player && isNight ? this.getVisibleTilesForPlayer(player, visionRadius) : null;
 
     return {
-      map: player ? this.getMaskedMapForPlayer(visibleTiles) : this.map,
+      map: player && isNight ? this.getMaskedMapForPlayer(visibleTiles) : this.map,
       phase: this.phase,
+      lightingMode,
       timer: Math.ceil(this.phaseTimer),
       players: [...this.players.values()]
-        .filter((p) => !player || this.isWithinVision(player, p, visionRadius))
+        .filter((p) => !player || !isNight || this.isWithinVision(player, p, visionRadius))
         .map((p) => ({
           id: p.id,
           username: p.username,
@@ -504,13 +514,13 @@ class Game {
           xp: p.xp,
           level: p.level,
         })),
-      enemies: this.enemies.filter((e) => !player || this.isWithinVision(player, e, visionRadius)),
-      projectiles: this.projectiles.filter((proj) => !player || this.isWithinVision(player, proj, visionRadius)),
+      enemies: this.enemies.filter((e) => !player || !isNight || this.isWithinVision(player, e, visionRadius)),
+      projectiles: this.projectiles.filter((proj) => !player || !isNight || this.isWithinVision(player, proj, visionRadius)),
       events: this.events,
       recipes: RECIPES,
       materials: MATERIALS,
       visibility: SPECIAL_TILE_VISIBILITY,
-      visionRadius,
+      visionRadius: isNight ? visionRadius : null,
     };
   }
 }
