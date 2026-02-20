@@ -1,5 +1,15 @@
 const { generateMap, isWalkable } = require('./map');
-const { TILE, PHASES, PHASE_LENGTH_SECONDS, RECIPES, MATERIALS } = require('./constants');
+const {
+  TILE,
+  HIDDEN_TILE,
+  PHASES,
+  PHASE_LENGTH_SECONDS,
+  RECIPES,
+  MATERIALS,
+  VISION_RADIUS_BASE_TILES,
+  VISION_RADIUS_PER_TORCH_TIER,
+  SPECIAL_TILE_VISIBILITY,
+} = require('./constants');
 const { getUserProfile, addXp, touchUser } = require('./persistence');
 
 const PLAYER_SPEED = 5; // tiles per second
@@ -384,28 +394,90 @@ class Game {
     if (this.events.length > 12) this.events.shift();
   }
 
-  getSnapshot() {
+  getVisionRadiusForPlayer(player) {
+    return VISION_RADIUS_BASE_TILES + player.gear.torch * VISION_RADIUS_PER_TORCH_TIER;
+  }
+
+  isWithinVision(player, entity, radius) {
+    return Math.hypot(entity.x - player.x, entity.y - player.y) <= radius;
+  }
+
+  getVisibleTilesForPlayer(player, radius) {
+    const visible = Array.from({ length: this.map.height }, () => Array.from({ length: this.map.width }, () => false));
+    const radiusSq = radius * radius;
+    const px = player.x;
+    const py = player.y;
+
+    for (let y = 0; y < this.map.height; y += 1) {
+      for (let x = 0; x < this.map.width; x += 1) {
+        const dx = x - px;
+        const dy = y - py;
+        if (dx * dx + dy * dy <= radiusSq) {
+          visible[y][x] = true;
+        }
+      }
+    }
+
+    if (SPECIAL_TILE_VISIBILITY.checkpoint === 'always') {
+      this.map.checkpoints.forEach((cp) => {
+        visible[cp.y][cp.x] = true;
+      });
+    }
+
+    if (SPECIAL_TILE_VISIBILITY.objective === 'always') {
+      visible[this.map.objective.y][this.map.objective.x] = true;
+    }
+
+    return visible;
+  }
+
+  getMaskedMapForPlayer(visibleTiles) {
+    const tiles = this.map.tiles.map((row, y) => row.map((tile, x) => {
+      if (!visibleTiles[y][x]) return HIDDEN_TILE;
+      return tile;
+    }));
+
     return {
-      map: this.map,
+      width: this.map.width,
+      height: this.map.height,
+      tiles,
+      objective: this.map.objective,
+      checkpoints: this.map.checkpoints,
+      spawns: this.map.spawns,
+    };
+  }
+
+  getSnapshotForPlayer(clientId) {
+    const now = Date.now() / 1000;
+    const player = this.players.get(clientId);
+    const visionRadius = player ? this.getVisionRadiusForPlayer(player) : 0;
+    const visibleTiles = player ? this.getVisibleTilesForPlayer(player, visionRadius) : null;
+
+    return {
+      map: player ? this.getMaskedMapForPlayer(visibleTiles) : this.map,
       phase: this.phase,
       timer: Math.ceil(this.phaseTimer),
-      players: [...this.players.values()].map((p) => ({
-        id: p.id,
-        username: p.username,
-        x: p.x,
-        y: p.y,
-        inventory: p.inventory,
-        gear: p.gear,
-        tagged: Date.now() / 1000 < p.taggedUntil,
-        objectiveReached: p.objectiveReached,
-        xp: p.xp,
-        level: p.level,
-      })),
-      enemies: this.enemies,
-      projectiles: this.projectiles,
+      players: [...this.players.values()]
+        .filter((p) => !player || this.isWithinVision(player, p, visionRadius))
+        .map((p) => ({
+          id: p.id,
+          username: p.username,
+          x: p.x,
+          y: p.y,
+          inventory: p.inventory,
+          gear: p.gear,
+          tagged: now < p.taggedUntil,
+          objectiveReached: p.objectiveReached,
+          xp: p.xp,
+          level: p.level,
+        })),
+      enemies: this.enemies.filter((e) => !player || this.isWithinVision(player, e, visionRadius)),
+      projectiles: this.projectiles.filter((proj) => !player || this.isWithinVision(player, proj, visionRadius)),
       events: this.events,
       recipes: RECIPES,
       materials: MATERIALS,
+      visibility: SPECIAL_TILE_VISIBILITY,
+      visionRadius,
     };
   }
 }
