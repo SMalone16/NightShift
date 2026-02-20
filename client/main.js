@@ -170,6 +170,29 @@ function getCurrentZone(map, me) {
   )) || null;
 }
 
+function drawSafeZones(map, camera) {
+  if (!Array.isArray(map.safeZones)) return;
+
+  map.safeZones.forEach((zone) => {
+    zone.tiles.forEach((tile) => {
+      const screen = worldToScreen(tile.x, tile.y, camera);
+      if (!isOnScreen(screen.x, screen.y, TILE_SIZE)) return;
+
+      ctx.save();
+      ctx.fillStyle = zone.destroyed ? 'rgba(120, 30, 30, 0.45)' : 'rgba(90, 170, 220, 0.35)';
+      ctx.fillRect(screen.x, screen.y, TILE_SIZE, TILE_SIZE);
+      ctx.fillStyle = zone.destroyed ? '#ffd0d0' : '#e8f8ff';
+      ctx.font = '10px sans-serif';
+      ctx.fillText('SAFE ZONE', screen.x + 2, screen.y + 11);
+      if (zone.destroyed) {
+        ctx.fillStyle = '#ffd1a8';
+        ctx.fillText('DESTROYED', screen.x + 2, screen.y + 22);
+      }
+      ctx.restore();
+    });
+  });
+}
+
 function drawZoneOverlay(map, me, camera) {
   const zone = getCurrentZone(map, me);
   if (!zone) return;
@@ -251,6 +274,8 @@ function render() {
       }
     }
   }
+
+  drawSafeZones(map, camera);
 
   snapshot.projectiles.forEach((proj) => {
     const screen = worldToScreen(proj.x, proj.y, camera);
@@ -345,7 +370,10 @@ function renderHud() {
   const everyone = snapshot.players
     .map((p) => `${p.objectiveReached ? '✅' : '⬜'} ${p.username}`)
     .join('<br>');
-  teamInfo.innerHTML = `<strong>Objective status</strong><br>${everyone}`;
+  const safeZoneStatus = (snapshot.map.safeZones || [])
+    .map((zone) => `${zone.name}: ${zone.remainingHits}/${zone.maxHits}${zone.destroyed ? ' (destroyed)' : ''}`)
+    .join('<br>');
+  teamInfo.innerHTML = `<strong>Objective status</strong><br>${everyone}<br><br><strong>Safe Zones</strong><br>${safeZoneStatus || 'No safe zones available.'}`;
 
   eventsList.innerHTML = snapshot.events.map((ev) => `<li>${ev.message}</li>`).join('');
 }
