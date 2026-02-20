@@ -40,8 +40,18 @@ const RECIPES = {
 
 const MATERIALS = ['wood', 'stone', 'cloth', 'oil', 'pebbles'];
 
+const HIDDEN_TILE = 99;
+const VISION_RADIUS_BASE_TILES = 4;
+const VISION_RADIUS_PER_TORCH_TIER = 2;
+
+const SPECIAL_TILE_VISIBILITY = {
+  checkpoint: 'always',
+  objective: 'hidden-until-seen',
+};
+
 module.exports = {
   TILE,
+  HIDDEN_TILE,
   TILE_SIZE,
   MAP_WIDTH,
   MAP_HEIGHT,
@@ -49,4 +59,7 @@ module.exports = {
   PHASE_LENGTH_SECONDS,
   RECIPES,
   MATERIALS,
+  VISION_RADIUS_BASE_TILES,
+  VISION_RADIUS_PER_TORCH_TIER,
+  SPECIAL_TILE_VISIBILITY,
 };

@@ -66,10 +66,11 @@ setInterval(() => {
 }, 1000 / TICK_RATE);
 
 setInterval(() => {
-  const snapshot = game.getSnapshot();
-  const payload = JSON.stringify({ type: 'snapshot', snapshot });
-  clientSockets.forEach((ws) => {
-    if (ws.readyState === ws.OPEN) ws.send(payload);
+  clientSockets.forEach((ws, clientId) => {
+    const snapshot = game.getSnapshotForPlayer(clientId);
+    if (ws.readyState === ws.OPEN) {
+      ws.send(JSON.stringify({ type: 'snapshot', snapshot }));
+    }
   });
 }, BROADCAST_MS);
 

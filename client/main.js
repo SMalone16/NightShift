@@ -8,6 +8,7 @@ const COLORS = {
   5: '#3a96b8', // checkpoint
   6: '#b88e25', // objective
   7: '#966f3d', // chest
+  99: '#000000', // hidden
 };
 
 const joinPanel = document.getElementById('joinPanel');
@@ -137,27 +138,6 @@ function render() {
     ctx.fillText(player.username, player.x * TILE_SIZE - 20, player.y * TILE_SIZE - 12);
   });
 
-  // Chase darkness overlay with torch radius for self.
-  if (snapshot.phase === 'chase') {
-    const me = snapshot.players.find((p) => p.id === selfId);
-    if (me) {
-      const baseRadius = 120;
-      const radius = baseRadius + me.gear.torch * 60;
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.66)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      ctx.save();
-      ctx.globalCompositeOperation = 'destination-out';
-      const gradient = ctx.createRadialGradient(me.x * TILE_SIZE, me.y * TILE_SIZE, 30, me.x * TILE_SIZE, me.y * TILE_SIZE, radius);
-      gradient.addColorStop(0, 'rgba(0, 0, 0, 1)');
-      gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      ctx.fillStyle = gradient;
-      ctx.beginPath();
-      ctx.arc(me.x * TILE_SIZE, me.y * TILE_SIZE, radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-  }
 }
 
 function renderHud() {
