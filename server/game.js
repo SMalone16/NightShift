@@ -75,6 +75,8 @@ class Game {
       inputs: { up: false, down: false, left: false, right: false },
       wantsCraft: false,
       wantsAttack: false,
+      wantsWeaponSwap: false,
+      selectedWeapon: 'bat',
       inventory: makeEmptyInventory(),
       gear: makeGear(),
       taggedUntil: 0,
@@ -105,6 +107,11 @@ class Game {
     p.inputs.right = !!payload.right;
     p.wantsCraft = !!payload.craft;
     p.wantsAttack = !!payload.attack;
+    p.wantsWeaponSwap = !!payload.swapWeapon;
+
+    if (payload.selectedWeapon === 'bat' || payload.selectedWeapon === 'slingshot') {
+      this.setSelectedWeapon(p, payload.selectedWeapon);
+    }
   }
 
   tick(dt, now) {
@@ -199,11 +206,23 @@ class Game {
         p.wantsCraft = false;
       }
 
+      if (p.wantsWeaponSwap) {
+        const nextWeapon = p.selectedWeapon === 'slingshot' ? 'bat' : 'slingshot';
+        this.setSelectedWeapon(p, nextWeapon);
+        p.wantsWeaponSwap = false;
+      }
+
       if (p.wantsAttack && now >= p.attackCooldownUntil) {
         this.handleAttack(p, now);
         p.attackCooldownUntil = now + ATTACK_COOLDOWN;
       }
     });
+  }
+
+  setSelectedWeapon(player, weapon) {
+    if (weapon !== 'bat' && weapon !== 'slingshot') return;
+    if (player.gear[weapon] <= 0) return;
+    player.selectedWeapon = weapon;
   }
 
   tryMovePlayer(player, nx, ny) {
@@ -283,7 +302,7 @@ class Game {
   }
 
   handleAttack(player, now) {
-    if (player.gear.slingshot > 0) {
+    if (player.selectedWeapon === 'slingshot' && player.gear.slingshot > 0) {
       this.projectiles.push({
         id: this.nextProjectileId++,
         ownerId: player.id,
@@ -298,7 +317,7 @@ class Game {
       return;
     }
 
-    if (player.gear.bat > 0) {
+    if (player.selectedWeapon === 'bat' && player.gear.bat > 0) {
       this.enemies.forEach((e) => {
         if (Math.abs(e.x - player.x) <= 1 && Math.abs(e.y - player.y) <= 1) {
           e.stunnedUntil = now + 0.5 + 0.2 * player.gear.bat;
@@ -466,6 +485,7 @@ class Game {
           y: p.y,
           inventory: p.inventory,
           gear: p.gear,
+          selectedWeapon: p.selectedWeapon,
           tagged: now < p.taggedUntil,
           objectiveReached: p.objectiveReached,
           xp: p.xp,

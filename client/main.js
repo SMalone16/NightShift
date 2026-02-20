@@ -36,6 +36,7 @@ const inputState = {
   right: false,
   craft: false,
   attack: false,
+  swapWeapon: false,
 };
 
 joinBtn.addEventListener('click', () => {
@@ -73,6 +74,7 @@ function sendInput() {
   socket.send(JSON.stringify({ type: 'input', payload: inputState }));
   inputState.attack = false;
   inputState.craft = false;
+  inputState.swapWeapon = false;
 }
 
 setInterval(sendInput, 50);
@@ -85,6 +87,10 @@ window.addEventListener('keydown', (e) => {
   if (e.key.toLowerCase() === 'e') inputState.craft = true;
   if (e.code === 'Space') {
     inputState.attack = true;
+    e.preventDefault();
+  }
+  if (e.key.toLowerCase() === 'q') {
+    inputState.swapWeapon = true;
     e.preventDefault();
   }
 });
@@ -152,7 +158,8 @@ function renderHud() {
     wood: ${me.inventory.wood} | stone: ${me.inventory.stone}<br>
     cloth: ${me.inventory.cloth} | oil: ${me.inventory.oil} | pebbles: ${me.inventory.pebbles}
   `;
-  gearInfo.innerHTML = `<strong>Gear</strong><br>Torch T${me.gear.torch} | Bat T${me.gear.bat} | Slingshot T${me.gear.slingshot}`;
+  const selectedWeaponLabel = me.selectedWeapon === 'slingshot' ? 'Slingshot' : 'Bat';
+  gearInfo.innerHTML = `<strong>Gear</strong><br>Torch T${me.gear.torch} | Bat T${me.gear.bat} | Slingshot T${me.gear.slingshot}<br><strong>Selected:</strong> ${selectedWeaponLabel} (Q to swap)`;
 
   const everyone = snapshot.players
     .map((p) => `${p.objectiveReached ? '✅' : '⬜'} ${p.username}`)
