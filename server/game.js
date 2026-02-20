@@ -22,6 +22,7 @@ const PLAYER_SPEED = 5; // tiles per second
 const ENEMY_SPEED = 3.2;
 const TAG_DURATION = 1.0;
 const ATTACK_COOLDOWN = 0.45;
+const SAFE_ZONE_ATTACK_COOLDOWN = 0.9;
 
 function makeEmptyInventory() {
   return {
@@ -93,6 +94,7 @@ class Game {
       objectiveReached: false,
       xp: profile.xp,
       level: profile.level,
+      safeZoneState: { entranceZoneId: null, activeZoneId: null },
     };
     this.players.set(clientId, player);
     this.logEvent(`${username} joined the shift.`);
@@ -179,6 +181,7 @@ class Game {
       p.y = s.y;
       p.objectiveReached = false;
       p.taggedUntil = now;
+      p.safeZoneState = { entranceZoneId: null, activeZoneId: null };
       i += 1;
     });
   }
@@ -197,6 +200,7 @@ class Game {
         x: spawn.x,
         y: spawn.y,
         stunnedUntil: 0,
+        zoneAttackCooldownUntil: 0,
       });
     }
 
@@ -270,7 +274,35 @@ class Game {
         this.handleAttack(p, now);
         p.attackCooldownUntil = now + ATTACK_COOLDOWN;
       }
+
+      this.updatePlayerSafeZoneState(p);
     });
+  }
+
+  updatePlayerSafeZoneState(player) {
+    if (!player.safeZoneState) {
+      player.safeZoneState = { entranceZoneId: null, activeZoneId: null };
+    }
+
+    const insideZone = this.getSafeZoneAtPosition(player.x, player.y, true);
+    const entranceZone = this.getSafeZoneAtEntrancePosition(player.x, player.y, true);
+    if (entranceZone && this.isPlayerAtSafeZoneEntrance(player, entranceZone)) {
+      player.safeZoneState.entranceZoneId = entranceZone.id;
+    }
+
+    if (!insideZone || insideZone.destroyed) {
+      player.safeZoneState.activeZoneId = null;
+      if (!this.getSafeZoneAtEntrancePosition(player.x, player.y, true)) {
+        player.safeZoneState.entranceZoneId = null;
+      }
+      return;
+    }
+
+    if (player.safeZoneState.activeZoneId === insideZone.id) return;
+
+    if (player.safeZoneState.entranceZoneId === insideZone.id) {
+      player.safeZoneState.activeZoneId = insideZone.id;
+    }
   }
 
   setSelectedWeapon(player, weapon) {
@@ -409,8 +441,11 @@ class Game {
       const target = this.findNearestTarget(enemy);
       if (!target) return;
 
-      const dx = Math.sign(target.x - enemy.x);
-      const dy = Math.sign(target.y - enemy.y);
+      const targetX = target.type === 'zone' ? target.position.x : target.player.x;
+      const targetY = target.type === 'zone' ? target.position.y : target.player.y;
+
+      const dx = Math.sign(targetX - enemy.x);
+      const dy = Math.sign(targetY - enemy.y);
       const step = ENEMY_SPEED * dt;
       const nx = enemy.x + dx * step;
       const ny = enemy.y + dy * step;
@@ -418,10 +453,40 @@ class Game {
       if (this.canEnemyMoveTo(nx, enemy.y)) enemy.x = nx;
       if (this.canEnemyMoveTo(enemy.x, ny)) enemy.y = ny;
 
-      if (Math.abs(enemy.x - target.x) < 0.75 && Math.abs(enemy.y - target.y) < 0.75) {
-        target.taggedUntil = now + TAG_DURATION;
+      if (target.type === 'zone') {
+        this.tryAttackSafeZone(enemy, target.zone, target.position, now);
+        return;
+      }
+
+      if (Math.abs(enemy.x - target.player.x) < 0.75 && Math.abs(enemy.y - target.player.y) < 0.75) {
+        target.player.taggedUntil = now + TAG_DURATION;
       }
     });
+  }
+
+  tryAttackSafeZone(enemy, zone, attackPoint, now) {
+    if (zone.destroyed || enemy.zoneAttackCooldownUntil > now) return;
+
+    if (Math.abs(enemy.x - attackPoint.x) >= 0.8 || Math.abs(enemy.y - attackPoint.y) >= 0.8) {
+      return;
+    }
+
+    zone.remainingHits -= 1;
+    enemy.zoneAttackCooldownUntil = now + SAFE_ZONE_ATTACK_COOLDOWN;
+
+    if (zone.remainingHits <= 0) {
+      zone.remainingHits = 0;
+      zone.destroyed = true;
+      this.players.forEach((player) => {
+        if (player.safeZoneState?.activeZoneId === zone.id) {
+          player.safeZoneState.activeZoneId = null;
+        }
+      });
+      this.logEvent(`${zone.name} was destroyed! Players inside are now exposed.`);
+      return;
+    }
+
+    this.logEvent(`${zone.name} was hit (${zone.remainingHits}/${zone.maxHits}).`);
   }
 
   canEnemyMoveTo(x, y) {
@@ -429,24 +494,84 @@ class Game {
     const ty = Math.round(y);
     const tile = this.map.tiles[ty]?.[tx];
     if (tile === undefined) return false;
-    if (tile === TILE.CHECKPOINT) return false;
+    const intactSafeZone = this.getSafeZoneAtPosition(tx, ty, true);
+    if (intactSafeZone && !intactSafeZone.destroyed) return false;
     return isWalkable(tile);
   }
 
-  isPlayerSafe(player) {
+  isPlayerInSafeZone(player) {
+    return !!this.getProtectedSafeZoneForPlayer(player);
+  }
+
+  isPlayerAtSafeZoneEntrance(player, zone) {
     const tx = Math.round(player.x);
     const ty = Math.round(player.y);
-    return this.phase === PHASES.NIGHT && this.map.tiles[ty][tx] === TILE.CHECKPOINT;
+    return zone.entrances.some((entrance) => entrance.x === tx && entrance.y === ty);
+  }
+
+  getProtectedSafeZoneForPlayer(player) {
+    if (this.phase !== PHASES.NIGHT) return null;
+    const safeZone = this.getSafeZoneAtPosition(player.x, player.y, true);
+    if (!safeZone || safeZone.destroyed) return null;
+
+    if (!player.safeZoneState || player.safeZoneState.activeZoneId !== safeZone.id) {
+      return null;
+    }
+
+    return safeZone;
+  }
+
+  getSafeZoneAtPosition(x, y, intactOnly = false) {
+    const tx = Math.round(x);
+    const ty = Math.round(y);
+    const found = this.map.safeZones?.find((zone) => zone.tiles.some((tile) => tile.x === tx && tile.y === ty));
+    if (!found) return null;
+    if (intactOnly && found.destroyed) return null;
+    return found;
+  }
+
+  getSafeZoneAtEntrancePosition(x, y, intactOnly = false) {
+    const tx = Math.round(x);
+    const ty = Math.round(y);
+    const found = this.map.safeZones?.find((zone) => zone.entrances.some((entrance) => entrance.x === tx && entrance.y === ty));
+    if (!found) return null;
+    if (intactOnly && found.destroyed) return null;
+    return found;
   }
 
   findNearestTarget(enemy) {
-    let best = null;
+    const unsafePlayers = [];
     this.players.forEach((p) => {
-      if (this.isPlayerSafe(p)) return;
-      const d = distManhattan({ x: enemy.x, y: enemy.y }, p);
-      if (!best || d < best.dist) best = { player: p, dist: d };
+      if (this.isPlayerInSafeZone(p)) return;
+      unsafePlayers.push(p);
     });
-    return best?.player || null;
+
+    if (unsafePlayers.length > 0) {
+      let best = null;
+      unsafePlayers.forEach((p) => {
+        const d = distManhattan({ x: enemy.x, y: enemy.y }, p);
+        if (!best || d < best.dist) best = { player: p, dist: d };
+      });
+      return best ? { type: 'player', player: best.player } : null;
+    }
+
+    let bestZone = null;
+    const occupiedSafeZones = this.map.safeZones.filter((zone) => {
+      if (zone.destroyed) return false;
+      return [...this.players.values()].some((player) => this.getProtectedSafeZoneForPlayer(player)?.id === zone.id);
+    });
+
+    occupiedSafeZones.forEach((zone) => {
+      zone.entrances.forEach((entrance) => {
+        const d = distManhattan({ x: enemy.x, y: enemy.y }, entrance);
+        if (!bestZone || d < bestZone.dist) {
+          bestZone = { zone, position: entrance, dist: d };
+        }
+      });
+    });
+
+    if (!bestZone) return null;
+    return { type: 'zone', zone: bestZone.zone, position: bestZone.position };
   }
 
   checkObjectiveWin() {
@@ -532,6 +657,7 @@ class Game {
       tiles,
       objective: this.map.objective,
       checkpoints: this.map.checkpoints,
+      safeZones: this.map.safeZones || [],
       spawns: this.map.spawns,
       zones: this.map.zones || [],
     };

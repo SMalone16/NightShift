@@ -7,6 +7,13 @@ const ZONES = [
   { id: 'outskirts', label: 'Outskirts', x1: 1, y1: MAP_HEIGHT - 12, x2: MAP_WIDTH - 2, y2: MAP_HEIGHT - 2 },
 ];
 
+const SAFE_ZONE_BLUEPRINTS = [
+  { id: 'safe-a', name: 'Safe Zone A', checkpointIndex: 0, maxHits: 5 },
+  { id: 'safe-b', name: 'Safe Zone B', checkpointIndex: 1, maxHits: 5 },
+  { id: 'safe-c', name: 'Safe Zone C', checkpointIndex: 2, maxHits: 6 },
+  { id: 'safe-d', name: 'Safe Zone D', checkpointIndex: 3, maxHits: 6 },
+];
+
 function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
@@ -45,6 +52,37 @@ function carvePath(grid, x1, y1, x2, y2) {
     y += y < y2 ? 1 : -1;
   }
   grid[y][x] = TILE.PATH;
+}
+
+function getEntrancesForCheckpoint(grid, checkpoint) {
+  const candidates = [
+    { x: checkpoint.x, y: checkpoint.y - 1 },
+    { x: checkpoint.x + 1, y: checkpoint.y },
+    { x: checkpoint.x, y: checkpoint.y + 1 },
+    { x: checkpoint.x - 1, y: checkpoint.y },
+  ];
+
+  return candidates.filter((pos) => {
+    const tile = grid[pos.y]?.[pos.x];
+    return tile !== undefined && tile !== TILE.TREE && tile !== TILE.ROCK && tile !== TILE.STALL;
+  });
+}
+
+function buildSafeZones(grid, checkpoints) {
+  return SAFE_ZONE_BLUEPRINTS.map((zoneDef) => {
+    const checkpoint = checkpoints[zoneDef.checkpointIndex];
+    const entrances = getEntrancesForCheckpoint(grid, checkpoint);
+
+    return {
+      id: zoneDef.id,
+      name: zoneDef.name,
+      tiles: [{ x: checkpoint.x, y: checkpoint.y }],
+      entrances,
+      maxHits: zoneDef.maxHits,
+      remainingHits: zoneDef.maxHits,
+      destroyed: false,
+    };
+  });
 }
 
 function generateMap() {
@@ -102,6 +140,8 @@ function generateMap() {
     { x: 12, y: MAP_HEIGHT - 7 },
   ];
 
+  const safeZones = buildSafeZones(grid, checkpoints);
+
   return {
     width: MAP_WIDTH,
     height: MAP_HEIGHT,
@@ -110,6 +150,7 @@ function generateMap() {
     tiles: grid,
     objective,
     checkpoints,
+    safeZones,
     spawns,
     zones: ZONES,
   };

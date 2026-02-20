@@ -34,7 +34,9 @@ Then open `http://localhost:3000`.
 2. **Night (60s)**
    - Enemies spawn and chase the nearest non-safe player.
    - Each new night increases enemy pressure with larger waves.
-   - Checkpoints become safe respite areas (enemies avoid them, players there are not targeted).
+   - Safe zones can protect players from direct enemy targeting, but only after entering through a zone entrance tile.
+   - If everyone is sheltered in safe zones, enemies attack zone entrances instead; each hit reduces zone durability.
+   - When a zone reaches 0 durability, it is destroyed and no longer grants protection.
    - Team objective: **all players must reach objective tile(s)** before time runs out.
    - Visibility is masked by darkness; torch tier increases vision radius.
    - Win = XP reward and round reset to day. Fail = round reset to day.
@@ -70,6 +72,13 @@ Recipes:
 - **Camera/Exploration:** viewport is fixed while camera follows your player across a larger world
 
 ---
+
+
+### Safe Zone Rules
+- Each safe zone has a name, entrance tile(s), and durability (`remainingHits` / `maxHits`).
+- Protection only applies at night and only after crossing into the zone via an entrance tile.
+- Enemies will not enter an intact safe zone interior, but can gather at entrances and attack the zone itself when all players are sheltered.
+- Destroyed zones behave like normal tiles and no longer provide safety.
 
 ## Project Structure
 
