@@ -33,6 +33,7 @@ Then open `http://localhost:3000`.
 
 2. **Night (60s)**
    - Enemies spawn and chase the nearest non-safe player.
+   - Each new night increases enemy pressure with larger waves.
    - Checkpoints become safe respite areas (enemies avoid them, players there are not targeted).
    - Team objective: **all players must reach objective tile(s)** before time runs out.
    - Visibility is masked by darkness; torch tier increases vision radius.

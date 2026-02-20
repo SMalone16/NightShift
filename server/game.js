@@ -9,6 +9,12 @@ const {
   VISION_RADIUS_BASE_TILES,
   VISION_RADIUS_PER_TORCH_TIER,
   SPECIAL_TILE_VISIBILITY,
+  ENEMY_SPAWN_MIN,
+  ENEMY_SPAWN_MAX,
+  ENEMY_NIGHT_SCALING_FACTOR,
+  ENEMY_SPAWN_PLAYER_BUFFER,
+  ENEMY_SPAWN_CHECKPOINT_BUFFER,
+  ENEMY_SPAWN_OBJECTIVE_BUFFER,
 } = require('./constants');
 const { getUserProfile, addXp, touchUser } = require('./persistence');
 
@@ -60,6 +66,7 @@ class Game {
     this.phase = PHASES.DAY;
     this.phaseTimer = PHASE_LENGTH_SECONDS[PHASES.DAY];
     this.roundStatus = 'running';
+    this.nightNumber = 0;
     this.events = [];
     this.lastEnemySpawnTick = 0;
   }
@@ -136,11 +143,12 @@ class Game {
     if (this.phase === PHASES.DAY) {
       this.phase = PHASES.NIGHT;
       this.phaseTimer = PHASE_LENGTH_SECONDS[PHASES.NIGHT];
+      this.nightNumber += 1;
       this.spawnEnemies();
       this.players.forEach((p) => {
         p.objectiveReached = false;
       });
-      this.logEvent('Night has fallen. Get to objective together!');
+      this.logEvent(`Night ${this.nightNumber} has fallen. ${this.enemies.length} enemies are hunting. Get to objective together!`);
     } else {
       this.resetRound(false, now);
     }
@@ -177,17 +185,59 @@ class Game {
 
   spawnEnemies() {
     this.enemies = [];
-    const count = Math.max(2, Math.min(6, this.players.size + 1));
-    for (let i = 0; i < count; i += 1) {
-      const ex = this.map.width - 4 - (i % 3);
-      const ey = 3 + i * 2;
+    const count = this.getEnemyCountForNight();
+    const spawnTiles = this.getEnemySpawnCandidates();
+    const maxSpawns = Math.min(count, spawnTiles.length);
+
+    for (let i = 0; i < maxSpawns; i += 1) {
+      const idx = Math.floor(Math.random() * spawnTiles.length);
+      const spawn = spawnTiles.splice(idx, 1)[0];
       this.enemies.push({
         id: this.nextEnemyId++,
-        x: ex,
-        y: ey,
+        x: spawn.x,
+        y: spawn.y,
         stunnedUntil: 0,
       });
     }
+
+    if (this.enemies.length < count) {
+      this.logEvent(`Night ${this.nightNumber}: only ${this.enemies.length}/${count} enemies could be deployed.`);
+    }
+
+    this.logEvent(`Night ${this.nightNumber}: ${this.enemies.length} enemies spawned.`);
+  }
+
+  getEnemyCountForNight() {
+    const base = this.players.size + 1;
+    const bonus = Math.floor(Math.max(0, this.nightNumber - 1) / ENEMY_NIGHT_SCALING_FACTOR);
+    return clamp(base + bonus, ENEMY_SPAWN_MIN, ENEMY_SPAWN_MAX);
+  }
+
+  getEnemySpawnCandidates() {
+    const candidates = [];
+
+    for (let y = 0; y < this.map.height; y += 1) {
+      for (let x = 0; x < this.map.width; x += 1) {
+        if (!this.canUseEnemySpawnTile(x, y)) continue;
+        candidates.push({ x, y });
+      }
+    }
+
+    return candidates;
+  }
+
+  canUseEnemySpawnTile(x, y) {
+    if (!isWalkable(this.map.tiles[y][x])) return false;
+
+    const tooCloseToPlayerSpawn = this.map.spawns.some((spawn) => distManhattan(spawn, { x, y }) < ENEMY_SPAWN_PLAYER_BUFFER);
+    if (tooCloseToPlayerSpawn) return false;
+
+    const tooCloseToCheckpoint = this.map.checkpoints.some((checkpoint) => distManhattan(checkpoint, { x, y }) < ENEMY_SPAWN_CHECKPOINT_BUFFER);
+    if (tooCloseToCheckpoint) return false;
+
+    if (distManhattan(this.map.objective, { x, y }) < ENEMY_SPAWN_OBJECTIVE_BUFFER) return false;
+
+    return true;
   }
 
   updatePlayers(dt, now) {
