@@ -19,7 +19,9 @@
       </section>
 
       <section id="gamePanel" class="hidden">
-        <canvas id="gameCanvas" width="1088" height="704"></canvas>
+        <div class="viewport-wrap">
+          <canvas id="gameCanvas" width="1088" height="704"></canvas>
+        </div>
         <aside class="hud">
           <h2>HUD</h2>
           <div id="phaseInfo"></div>
@@ -33,6 +35,8 @@
               <li>WASD / Arrow keys: Move</li>
               <li>E: Auto craft/upgrade</li>
               <li>Space: Attack (bat or slingshot)</li>
+              <li>Camera follows your ranger; explore by moving around the world</li>
+              <li>Zone card (top-left) shows where you are (Camp, Market, Forest, Outskirts)</li>
             </ul>
           </div>
           <h3>Event Log</h3>

@@ -10,8 +10,8 @@ const TILE = {
 };
 
 const TILE_SIZE = 32;
-const MAP_WIDTH = 34;
-const MAP_HEIGHT = 22;
+const MAP_WIDTH = 64;
+const MAP_HEIGHT = 40;
 
 const PHASES = {
   DAY: 'day',

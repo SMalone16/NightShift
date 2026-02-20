@@ -1,5 +1,12 @@
 const { TILE, MAP_WIDTH, MAP_HEIGHT } = require('./constants');
 
+const ZONES = [
+  { id: 'camp', label: 'Camp', x1: 1, y1: 1, x2: 20, y2: 15 },
+  { id: 'market', label: 'Market', x1: MAP_WIDTH - 20, y1: 1, x2: MAP_WIDTH - 2, y2: 14 },
+  { id: 'forest', label: 'Forest', x1: 10, y1: 12, x2: MAP_WIDTH - 14, y2: MAP_HEIGHT - 10 },
+  { id: 'outskirts', label: 'Outskirts', x1: 1, y1: MAP_HEIGHT - 12, x2: MAP_WIDTH - 2, y2: MAP_HEIGHT - 2 },
+];
+
 function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
@@ -53,49 +60,58 @@ function generateMap() {
     grid[y][MAP_WIDTH - 1] = TILE.TREE;
   }
 
-  // A small market strip in top-right.
-  for (let y = 2; y <= 5; y += 1) {
-    for (let x = MAP_WIDTH - 8; x <= MAP_WIDTH - 4; x += 1) {
+  // A market block in top-right.
+  for (let y = 2; y <= 11; y += 1) {
+    for (let x = MAP_WIDTH - 18; x <= MAP_WIDTH - 6; x += 1) {
       grid[y][x] = TILE.STALL;
     }
   }
 
   // Main paths through camp.
-  carvePath(grid, 2, Math.floor(MAP_HEIGHT / 2), MAP_WIDTH - 3, Math.floor(MAP_HEIGHT / 2));
-  carvePath(grid, Math.floor(MAP_WIDTH / 3), 2, Math.floor(MAP_WIDTH / 3), MAP_HEIGHT - 3);
+  const midY = Math.floor(MAP_HEIGHT / 2);
+  carvePath(grid, 2, midY, MAP_WIDTH - 3, midY);
+  carvePath(grid, Math.floor(MAP_WIDTH / 4), 2, Math.floor(MAP_WIDTH / 4), MAP_HEIGHT - 3);
+  carvePath(grid, Math.floor(MAP_WIDTH / 2), 4, Math.floor(MAP_WIDTH / 2), MAP_HEIGHT - 5);
 
   // Objective near bottom-right with a path around it.
-  const objective = { x: MAP_WIDTH - 5, y: MAP_HEIGHT - 4 };
+  const objective = { x: MAP_WIDTH - 7, y: MAP_HEIGHT - 6 };
+  carvePath(grid, Math.floor(MAP_WIDTH / 2), midY, objective.x, objective.y);
   grid[objective.y][objective.x] = TILE.OBJECTIVE;
-  carvePath(grid, Math.floor(MAP_WIDTH / 2), Math.floor(MAP_HEIGHT / 2), objective.x, objective.y);
 
   const checkpoints = [
-    { x: 5, y: 4 },
-    { x: Math.floor(MAP_WIDTH / 2), y: MAP_HEIGHT - 5 },
-    { x: MAP_WIDTH - 10, y: 8 },
+    { x: 6, y: 5 },
+    { x: Math.floor(MAP_WIDTH / 3), y: MAP_HEIGHT - 8 },
+    { x: Math.floor(MAP_WIDTH / 2), y: midY + 4 },
+    { x: MAP_WIDTH - 14, y: 10 },
   ];
   checkpoints.forEach((cp) => {
     grid[cp.y][cp.x] = TILE.CHECKPOINT;
   });
 
-  placeRandomTiles(grid, TILE.TREE, 42, (x, y) => Math.abs(x - objective.x) + Math.abs(y - objective.y) > 5);
-  placeRandomTiles(grid, TILE.ROCK, 28);
-  placeRandomTiles(grid, TILE.CHEST, 12);
+  const interiorTiles = (MAP_WIDTH - 2) * (MAP_HEIGHT - 2);
+  placeRandomTiles(grid, TILE.TREE, Math.floor(interiorTiles * 0.095), (x, y) => Math.abs(x - objective.x) + Math.abs(y - objective.y) > 7);
+  placeRandomTiles(grid, TILE.ROCK, Math.floor(interiorTiles * 0.06));
+  placeRandomTiles(grid, TILE.CHEST, Math.floor(interiorTiles * 0.022));
 
   const spawns = [
-    { x: 2, y: 2 },
-    { x: 3, y: MAP_HEIGHT - 3 },
-    { x: 6, y: Math.floor(MAP_HEIGHT / 2) },
-    { x: 2, y: Math.floor(MAP_HEIGHT / 2) + 2 },
+    { x: 3, y: 3 },
+    { x: 4, y: MAP_HEIGHT - 4 },
+    { x: 8, y: midY },
+    { x: 5, y: midY + 3 },
+    { x: 10, y: 6 },
+    { x: 12, y: MAP_HEIGHT - 7 },
   ];
 
   return {
     width: MAP_WIDTH,
     height: MAP_HEIGHT,
+    worldWidth: MAP_WIDTH,
+    worldHeight: MAP_HEIGHT,
     tiles: grid,
     objective,
     checkpoints,
     spawns,
+    zones: ZONES,
   };
 }
 
