@@ -477,10 +477,13 @@ class Game {
     return {
       width: this.map.width,
       height: this.map.height,
+      worldWidth: this.map.worldWidth || this.map.width,
+      worldHeight: this.map.worldHeight || this.map.height,
       tiles,
       objective: this.map.objective,
       checkpoints: this.map.checkpoints,
       spawns: this.map.spawns,
+      zones: this.map.zones || [],
     };
   }
 

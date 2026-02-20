@@ -66,6 +66,7 @@ Recipes:
 - **Auto-craft / auto-upgrade:** E
 - **Attack:** Space
 - **Cycle behavior:** Day is bright and fully visible; night enables darkness + flashlight radius
+- **Camera/Exploration:** viewport is fixed while camera follows your player across a larger world
 
 ---
 
@@ -119,7 +120,7 @@ level = Math.floor(Math.sqrt(xp / 50)) + 1;
 ## Next Steps (student-friendly enhancements)
 
 1. Add a **minimap** and fog-of-war explored tiles.
-2. Expand map generation with named zones (camp, market, forest) and weighted loot tables.
+2. Add a minimap for zone-aware navigation and long-distance objective tracking.
 3. Add enemy variants (fast scout, tank, ranged) and smarter pathfinding around obstacles.
 4. Add item durability + simple crafting UI queue while keeping server authoritative.
 5. Add match history and per-user stats (wins, best extraction time) to the JSON profile.
