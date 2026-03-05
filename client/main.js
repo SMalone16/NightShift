@@ -58,27 +58,27 @@ const eventsList = document.getElementById('events');
 
 const ASSETS = {
   tiles: {
-    tree: 'client/assets/sprites/tiles/tree.png',
-    rock: 'client/assets/sprites/tiles/rock.png',
-    chestClosed: 'client/assets/sprites/tiles/chest_closed.png',
+    tree: 'assets/sprites/tiles/tree.png',
+    rock: 'assets/sprites/tiles/rock.png',
+    chestClosed: 'assets/sprites/tiles/chest_closed.png',
   },
   player: {
     idle: {
-      down: 'client/assets/sprites/player/idle/down.png',
+      down: 'assets/sprites/player/idle/down.png',
     },
     walk: {
       left: [
-        'client/assets/sprites/player/walk/left_0.png',
-        'client/assets/sprites/player/walk/left_1.png',
-        'client/assets/sprites/player/walk/left_2.png',
+        'assets/sprites/player/walk/left_0.png',
+        'assets/sprites/player/walk/left_1.png',
+        'assets/sprites/player/walk/left_2.png',
       ],
     },
     slingshot: {
       fire: {
         left: [
-          'client/assets/sprites/player/slingshot/fire_left_0.png',
-          'client/assets/sprites/player/slingshot/fire_left_1.png',
-          'client/assets/sprites/player/slingshot/fire_left_2.png',
+          'assets/sprites/player/slingshot/fire_left_0.png',
+          'assets/sprites/player/slingshot/fire_left_1.png',
+          'assets/sprites/player/slingshot/fire_left_2.png',
         ],
       },
     },

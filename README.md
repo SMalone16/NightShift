@@ -100,6 +100,63 @@ NightShift/
   README.md
 ```
 
+## Asset Setup (required before sprites render)
+
+The client preloads sprite images from `client/assets/sprites/...` (served in-browser as `assets/sprites/...`).
+If any required image is missing or has a wrong filename, you'll see `Failed to load assets`.
+
+### 1) Create folders (not files)
+
+Run this from the repo root:
+
+```bash
+mkdir -p client/assets/sprites/tiles
+mkdir -p client/assets/sprites/player/idle
+mkdir -p client/assets/sprites/player/walk
+mkdir -p client/assets/sprites/player/slingshot
+```
+
+> If a command creates a file by mistake, remove it first (`rm client/assets/sprites/tiles`) and run `mkdir -p ...` again.
+
+### 2) Add the exact required files
+
+`client/assets/sprites/tiles/`
+- `tree.png`
+- `rock.png`
+- `chest_closed.png`
+
+`client/assets/sprites/player/idle/`
+- `down.png`
+
+`client/assets/sprites/player/walk/`
+- `left_0.png`
+- `left_1.png`
+- `left_2.png`
+
+`client/assets/sprites/player/slingshot/`
+- `fire_left_0.png`
+- `fire_left_1.png`
+- `fire_left_2.png`
+
+### 3) Optional: create temporary placeholders quickly
+
+If you only want to verify loading before real art is ready:
+
+```bash
+touch client/assets/sprites/tiles/tree.png
+touch client/assets/sprites/tiles/rock.png
+touch client/assets/sprites/tiles/chest_closed.png
+touch client/assets/sprites/player/idle/down.png
+touch client/assets/sprites/player/walk/left_0.png
+touch client/assets/sprites/player/walk/left_1.png
+touch client/assets/sprites/player/walk/left_2.png
+touch client/assets/sprites/player/slingshot/fire_left_0.png
+touch client/assets/sprites/player/slingshot/fire_left_1.png
+touch client/assets/sprites/player/slingshot/fire_left_2.png
+```
+
+Then replace these placeholder files with real PNG images.
+
 ---
 
 ## Networking & Simulation Notes
@@ -134,4 +191,3 @@ level = Math.floor(Math.sqrt(xp / 50)) + 1;
 3. Add enemy variants (fast scout, tank, ranged) and smarter pathfinding around obstacles.
 4. Add item durability + simple crafting UI queue while keeping server authoritative.
 5. Add match history and per-user stats (wins, best extraction time) to the JSON profile.
-
