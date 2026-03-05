@@ -709,18 +709,8 @@ class Game {
     return maskedMap;
   }
 
-  getSnapshotForPlayer(clientId) {
-    const now = Date.now() / 1000;
-    const player = this.players.get(clientId);
-    const lightingMode = this.getLightingMode();
-    const isNight = lightingMode === 'night';
-    const visionRadius = player ? this.getVisionRadiusForPlayer(player) : 0;
-
+  getVisibleEntitiesForPlayer(player, isNight, visionRadius, now = Date.now() / 1000) {
     return {
-      map: player && isNight ? this.getMaskedMapForPlayer(player, visionRadius) : this.map,
-      phase: this.phase,
-      lightingMode,
-      timer: Math.ceil(this.phaseTimer),
       players: [...this.players.values()]
         .filter((p) => !player || !isNight || this.isWithinVision(player, p, visionRadius))
         .map((p) => ({
@@ -742,10 +732,47 @@ class Game {
         })),
       enemies: this.enemies.filter((e) => !player || !isNight || this.isWithinVision(player, e, visionRadius)),
       projectiles: this.projectiles.filter((proj) => !player || !isNight || this.isWithinVision(player, proj, visionRadius)),
+    };
+  }
+
+  getSharedSnapshot() {
+    const lightingMode = this.getLightingMode();
+    const isNight = lightingMode === 'night';
+    const baseSnapshot = {
+      phase: this.phase,
+      lightingMode,
+      timer: Math.ceil(this.phaseTimer),
       events: this.events,
       recipes: RECIPES,
       materials: MATERIALS,
       visibility: SPECIAL_TILE_VISIBILITY,
+      map: this.map,
+      visionRadius: null,
+    };
+
+    if (isNight) {
+      return baseSnapshot;
+    }
+
+    return {
+      ...baseSnapshot,
+      ...this.getVisibleEntitiesForPlayer(null, false, 0),
+    };
+  }
+
+  getSnapshotDeltaForPlayer(clientId) {
+    const player = this.players.get(clientId);
+    const lightingMode = this.getLightingMode();
+    const isNight = lightingMode === 'night';
+    if (!isNight) {
+      return {};
+    }
+
+    const visionRadius = player ? this.getVisionRadiusForPlayer(player) : 0;
+
+    return {
+      map: player && isNight ? this.getMaskedMapForPlayer(player, visionRadius) : this.map,
+      ...this.getVisibleEntitiesForPlayer(player, isNight, visionRadius),
       visionRadius: isNight ? visionRadius : null,
     };
   }

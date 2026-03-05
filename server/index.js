@@ -6,7 +6,7 @@ const { Game } = require('./game');
 
 const PORT = process.env.PORT || 3000;
 const TICK_RATE = 60;
-const BROADCAST_MS = 100;
+const BROADCAST_MS = 150;
 
 const app = express();
 app.use(express.static(path.join(__dirname, '..', 'client')));
@@ -65,12 +65,30 @@ setInterval(() => {
   game.tick(dt, now);
 }, 1000 / TICK_RATE);
 
+let lastSharedKey = '';
+let sharedPayload = '';
+
 setInterval(() => {
+  const sharedSnapshot = game.getSharedSnapshot();
+  const sharedKey = JSON.stringify(sharedSnapshot);
+
+  if (sharedKey !== lastSharedKey) {
+    lastSharedKey = sharedKey;
+    sharedPayload = JSON.stringify({ type: 'snapshotShared', snapshot: sharedSnapshot });
+    clientSockets.forEach((ws) => {
+      if (ws.readyState === ws.OPEN) {
+        ws.send(sharedPayload);
+      }
+    });
+  }
+
   clientSockets.forEach((ws, clientId) => {
-    const snapshot = game.getSnapshotForPlayer(clientId);
-    if (ws.readyState === ws.OPEN) {
-      ws.send(JSON.stringify({ type: 'snapshot', snapshot }));
-    }
+    if (ws.readyState !== ws.OPEN) return;
+    const deltaPayload = JSON.stringify({
+      type: 'snapshotDelta',
+      snapshot: game.getSnapshotDeltaForPlayer(clientId),
+    });
+    ws.send(deltaPayload);
   });
 }, BROADCAST_MS);
 
