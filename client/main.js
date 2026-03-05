@@ -23,6 +23,25 @@ const NIGHT_COLORS = {
   99: '#000000', // hidden
 };
 
+const TILE = {
+  GRASS: 0,
+  TREE: 1,
+  ROCK: 2,
+  STALL: 3,
+  PATH: 4,
+  CHECKPOINT: 5,
+  OBJECTIVE: 6,
+  CHEST: 7,
+};
+
+const HIDDEN_TILE = 99;
+
+const TILE_SPRITE_KEYS = {
+  [TILE.TREE]: 'tree',
+  [TILE.ROCK]: 'rock',
+  [TILE.CHEST]: 'chestClosed',
+};
+
 const joinPanel = document.getElementById('joinPanel');
 const gamePanel = document.getElementById('gamePanel');
 const usernameInput = document.getElementById('usernameInput');
@@ -340,12 +359,21 @@ function render() {
 
   for (let y = minTileY; y <= maxTileY; y += 1) {
     for (let x = minTileX; x <= maxTileX; x += 1) {
-      const tile = map.tiles[y]?.[x] ?? 99;
+      const tile = map.tiles[y]?.[x] ?? HIDDEN_TILE;
       const screen = worldToScreen(x, y, camera);
-      ctx.fillStyle = tileColors[tile] || '#000';
-      ctx.fillRect(screen.x, screen.y, TILE_SIZE, TILE_SIZE);
 
-      if (tile === 5) {
+      const spriteKey = TILE_SPRITE_KEYS[tile];
+      const tileSprite = spriteKey ? loadedAssets?.tiles?.[spriteKey] : null;
+      const shouldUseBlackout = lightingMode === 'night' && tile === HIDDEN_TILE;
+
+      if (tileSprite && !shouldUseBlackout) {
+        ctx.drawImage(tileSprite, screen.x, screen.y, TILE_SIZE, TILE_SIZE);
+      } else {
+        ctx.fillStyle = tileColors[tile] || '#000';
+        ctx.fillRect(screen.x, screen.y, TILE_SIZE, TILE_SIZE);
+      }
+
+      if (tile === TILE.CHECKPOINT) {
         ctx.fillStyle = 'rgba(180,240,255,0.25)';
         ctx.fillRect(screen.x, screen.y, TILE_SIZE, TILE_SIZE);
       }
