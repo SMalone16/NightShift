@@ -23,6 +23,7 @@ const ENEMY_SPEED = 3.2;
 const TAG_DURATION = 1.0;
 const ATTACK_COOLDOWN = 0.45;
 const SAFE_ZONE_ATTACK_COOLDOWN = 0.9;
+const PLAYER_BUCKET_SIZE = 4;
 
 function makeEmptyInventory() {
   return {
@@ -460,9 +461,11 @@ class Game {
   }
 
   updateEnemies(dt, now) {
+    const targetingContext = this.buildEnemyTargetingContext();
+
     this.enemies.forEach((enemy) => {
       if (enemy.stunnedUntil > now) return;
-      const target = this.findNearestTarget(enemy);
+      const target = this.findNearestTarget(enemy, targetingContext);
       if (!target) return;
 
       const targetX = target.type === 'zone' ? target.position.x : target.player.x;
@@ -486,6 +489,25 @@ class Game {
         target.player.taggedUntil = now + TAG_DURATION;
       }
     });
+  }
+
+  buildEnemyTargetingContext() {
+    const unsafePlayers = [];
+    const playerBuckets = new Map();
+
+    this.players.forEach((player) => {
+      if (this.isPlayerInSafeZone(player)) return;
+      unsafePlayers.push(player);
+
+      const bucketX = Math.floor(player.x / PLAYER_BUCKET_SIZE);
+      const bucketY = Math.floor(player.y / PLAYER_BUCKET_SIZE);
+      const key = `${bucketX},${bucketY}`;
+      const bucket = playerBuckets.get(key) || [];
+      bucket.push(player);
+      playerBuckets.set(key, bucket);
+    });
+
+    return { unsafePlayers, playerBuckets };
   }
 
   tryAttackSafeZone(enemy, zone, attackPoint, now) {
@@ -563,16 +585,25 @@ class Game {
     return found;
   }
 
-  findNearestTarget(enemy) {
-    const unsafePlayers = [];
-    this.players.forEach((p) => {
-      if (this.isPlayerInSafeZone(p)) return;
-      unsafePlayers.push(p);
-    });
+  findNearestTarget(enemy, targetingContext = this.buildEnemyTargetingContext()) {
+    const { unsafePlayers, playerBuckets } = targetingContext;
 
     if (unsafePlayers.length > 0) {
       let best = null;
-      unsafePlayers.forEach((p) => {
+      const enemyBucketX = Math.floor(enemy.x / PLAYER_BUCKET_SIZE);
+      const enemyBucketY = Math.floor(enemy.y / PLAYER_BUCKET_SIZE);
+      const nearbyPlayers = [];
+
+      for (let y = enemyBucketY - 1; y <= enemyBucketY + 1; y += 1) {
+        for (let x = enemyBucketX - 1; x <= enemyBucketX + 1; x += 1) {
+          const bucket = playerBuckets.get(`${x},${y}`);
+          if (!bucket) continue;
+          nearbyPlayers.push(...bucket);
+        }
+      }
+
+      const candidates = nearbyPlayers.length > 0 ? nearbyPlayers : unsafePlayers;
+      candidates.forEach((p) => {
         const d = distManhattan({ x: enemy.x, y: enemy.y }, p);
         if (!best || d < best.dist) best = { player: p, dist: d };
       });
