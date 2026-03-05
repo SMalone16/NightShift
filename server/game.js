@@ -91,6 +91,8 @@ class Game {
       gear: makeGear(),
       taggedUntil: 0,
       attackCooldownUntil: 0,
+      lastAttackAt: 0,
+      lastAttackType: null,
       objectiveReached: false,
       xp: profile.xp,
       level: profile.level,
@@ -389,6 +391,8 @@ class Game {
 
   handleAttack(player, now) {
     if (player.selectedWeapon === 'slingshot' && player.gear.slingshot > 0) {
+      player.lastAttackAt = now;
+      player.lastAttackType = 'fire';
       const dirMag = Math.hypot(player.facingX, player.facingY) || 1;
       const dirX = player.facingX / dirMag;
       const dirY = player.facingY / dirMag;
@@ -411,6 +415,8 @@ class Game {
     }
 
     if (player.selectedWeapon === 'bat' && player.gear.bat > 0) {
+      player.lastAttackAt = now;
+      player.lastAttackType = 'swing';
       this.enemies.forEach((e) => {
         if (Math.abs(e.x - player.x) <= 1 && Math.abs(e.y - player.y) <= 1) {
           e.stunnedUntil = now + 0.5 + 0.2 * player.gear.bat;
@@ -689,6 +695,8 @@ class Game {
           gear: p.gear,
           selectedWeapon: p.selectedWeapon,
           tagged: now < p.taggedUntil,
+          lastAttackAt: p.lastAttackAt,
+          lastAttackType: p.lastAttackType,
           objectiveReached: p.objectiveReached,
           xp: p.xp,
           level: p.level,
