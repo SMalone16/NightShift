@@ -8,6 +8,7 @@
     "start": "node server/index.js"
   },
   "dependencies": {
+    "canvas": "^3.2.1",
     "express": "^4.19.2",
     "ws": "^8.18.0"
   }
