@@ -94,13 +94,13 @@ let selfId = null;
 let snapshot = null;
 const playerAnimTimers = new Map();
 
-const FIRE_EVENT_RE = /^(?<username>.+) fired slingshot\.$/;
 const PLAYER_FRAME_MS = {
   idle: 280,
   walk: 130,
   fire: 85,
+  swing: 85,
 };
-const FIRE_BURST_MS = 220;
+const ATTACK_ACTION_WINDOW_SECONDS = 0.22;
 
 function loadImage(src) {
   return new Promise((resolve, reject) => {
@@ -275,8 +275,6 @@ function getPlayerAnimState(player, now) {
     lastUpdateAt: now,
     frameElapsed: 0,
     frameIndex: 0,
-    fireUntil: 0,
-    lastSeenShotAt: 0,
   };
 
   const deltaMs = Math.max(0, now - animData.lastUpdateAt);
@@ -284,7 +282,11 @@ function getPlayerAnimState(player, now) {
   const direction = getDirectionFromFacing(player.facingX ?? 1, player.facingY ?? 0);
   const locomotion = moved ? 'walk' : 'idle';
   const weaponPosture = player.selectedWeapon === 'slingshot' ? 'slingshot' : 'bat';
-  const action = now < animData.fireUntil ? 'fire' : null;
+  const nowSeconds = Date.now() / 1000;
+  const recentAttack = Number(player.lastAttackAt) > 0 && (nowSeconds - Number(player.lastAttackAt)) < ATTACK_ACTION_WINDOW_SECONDS;
+  const action = recentAttack && (player.lastAttackType === 'fire' || player.lastAttackType === 'swing')
+    ? player.lastAttackType
+    : null;
 
   const frameFamily = action || locomotion;
   const frameDurationMs = PLAYER_FRAME_MS[frameFamily] || PLAYER_FRAME_MS.idle;
@@ -329,31 +331,6 @@ function getAnimationFramesForState(animState) {
   const idleDown = loadedAssets?.player?.idle?.down;
   if (idleDown) return [idleDown];
   return [];
-}
-
-function updateFireBurstsFromEvents(now) {
-  if (!snapshot) return;
-  const idByUsername = new Map(snapshot.players.map((player) => [player.username, player.id]));
-  snapshot.events.forEach((ev) => {
-    const match = FIRE_EVENT_RE.exec(ev.message || '');
-    if (!match) return;
-    const playerId = idByUsername.get(match.groups?.username);
-    if (!playerId) return;
-    const animData = playerAnimTimers.get(playerId) || {
-      prevX: 0,
-      prevY: 0,
-      lastUpdateAt: now,
-      frameElapsed: 0,
-      frameIndex: 0,
-      fireUntil: 0,
-      lastSeenShotAt: 0,
-    };
-    const eventAt = Number(ev.at) || 0;
-    if (eventAt <= animData.lastSeenShotAt) return;
-    animData.lastSeenShotAt = eventAt;
-    animData.fireUntil = Math.max(animData.fireUntil, now + FIRE_BURST_MS);
-    playerAnimTimers.set(playerId, animData);
-  });
 }
 
 function drawSafeZones(map, camera) {
@@ -449,7 +426,6 @@ function render() {
   const tileColors = lightingMode === 'night' ? NIGHT_COLORS : DAY_COLORS;
   const camera = getCamera(map, me);
   const now = performance.now();
-  updateFireBurstsFromEvents(now);
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
