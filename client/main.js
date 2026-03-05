@@ -92,6 +92,15 @@ let loadedAssets = null;
 let socket = null;
 let selfId = null;
 let snapshot = null;
+const playerAnimTimers = new Map();
+
+const FIRE_EVENT_RE = /^(?<username>.+) fired slingshot\.$/;
+const PLAYER_FRAME_MS = {
+  idle: 280,
+  walk: 130,
+  fire: 85,
+};
+const FIRE_BURST_MS = 220;
 
 function loadImage(src) {
   return new Promise((resolve, reject) => {
@@ -252,6 +261,101 @@ function getCurrentZone(map, me) {
   )) || null;
 }
 
+function getDirectionFromFacing(facingX = 1, facingY = 0) {
+  if (Math.abs(facingX) >= Math.abs(facingY)) {
+    return facingX < 0 ? 'left' : 'right';
+  }
+  return facingY < 0 ? 'up' : 'down';
+}
+
+function getPlayerAnimState(player, now) {
+  const animData = playerAnimTimers.get(player.id) || {
+    prevX: player.x,
+    prevY: player.y,
+    lastUpdateAt: now,
+    frameElapsed: 0,
+    frameIndex: 0,
+    fireUntil: 0,
+    lastSeenShotAt: 0,
+  };
+
+  const deltaMs = Math.max(0, now - animData.lastUpdateAt);
+  const moved = Math.hypot(player.x - animData.prevX, player.y - animData.prevY) > 0.002;
+  const direction = getDirectionFromFacing(player.facingX ?? 1, player.facingY ?? 0);
+  const locomotion = moved ? 'walk' : 'idle';
+  const weaponPosture = player.selectedWeapon === 'slingshot' ? 'slingshot' : 'bat';
+  const action = now < animData.fireUntil ? 'fire' : null;
+
+  const frameFamily = action || locomotion;
+  const frameDurationMs = PLAYER_FRAME_MS[frameFamily] || PLAYER_FRAME_MS.idle;
+  animData.frameElapsed += deltaMs;
+  if (animData.frameElapsed >= frameDurationMs) {
+    const advancedFrames = Math.floor(animData.frameElapsed / frameDurationMs);
+    animData.frameElapsed -= advancedFrames * frameDurationMs;
+    animData.frameIndex += advancedFrames;
+  }
+
+  animData.prevX = player.x;
+  animData.prevY = player.y;
+  animData.lastUpdateAt = now;
+  playerAnimTimers.set(player.id, animData);
+
+  return {
+    direction,
+    locomotion,
+    weaponPosture,
+    action,
+    frameIndex: animData.frameIndex,
+  };
+}
+
+function getAnimationFramesForState(animState) {
+  const direction = animState.direction;
+  const actionFrames = loadedAssets?.player?.[animState.weaponPosture]?.[animState.action]?.[direction];
+  if (Array.isArray(actionFrames) && actionFrames.length) {
+    return actionFrames;
+  }
+
+  const locomotionFrames = loadedAssets?.player?.[animState.locomotion]?.[direction];
+  if (Array.isArray(locomotionFrames) && locomotionFrames.length) {
+    return locomotionFrames;
+  }
+
+  const fallbackWalkFrames = loadedAssets?.player?.walk?.left;
+  if (Array.isArray(fallbackWalkFrames) && fallbackWalkFrames.length && animState.locomotion === 'walk') {
+    return fallbackWalkFrames;
+  }
+
+  const idleDown = loadedAssets?.player?.idle?.down;
+  if (idleDown) return [idleDown];
+  return [];
+}
+
+function updateFireBurstsFromEvents(now) {
+  if (!snapshot) return;
+  const idByUsername = new Map(snapshot.players.map((player) => [player.username, player.id]));
+  snapshot.events.forEach((ev) => {
+    const match = FIRE_EVENT_RE.exec(ev.message || '');
+    if (!match) return;
+    const playerId = idByUsername.get(match.groups?.username);
+    if (!playerId) return;
+    const animData = playerAnimTimers.get(playerId) || {
+      prevX: 0,
+      prevY: 0,
+      lastUpdateAt: now,
+      frameElapsed: 0,
+      frameIndex: 0,
+      fireUntil: 0,
+      lastSeenShotAt: 0,
+    };
+    const eventAt = Number(ev.at) || 0;
+    if (eventAt <= animData.lastSeenShotAt) return;
+    animData.lastSeenShotAt = eventAt;
+    animData.fireUntil = Math.max(animData.fireUntil, now + FIRE_BURST_MS);
+    playerAnimTimers.set(playerId, animData);
+  });
+}
+
 function drawSafeZones(map, camera) {
   if (!Array.isArray(map.safeZones)) return;
 
@@ -344,6 +448,8 @@ function render() {
   const lightingMode = getLightingMode();
   const tileColors = lightingMode === 'night' ? NIGHT_COLORS : DAY_COLORS;
   const camera = getCamera(map, me);
+  const now = performance.now();
+  updateFireBurstsFromEvents(now);
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -404,9 +510,16 @@ function render() {
     const screen = worldToScreen(player.x, player.y, camera);
     if (!isOnScreen(screen.x, screen.y, 24)) return;
 
-    ctx.fillStyle = isSelf ? '#4ec3ff' : '#f7f7f7';
-    if (player.tagged) ctx.fillStyle = '#ffb26a';
-    ctx.fillRect(screen.x - 9, screen.y - 9, 18, 18);
+    const animState = getPlayerAnimState(player, now);
+    const frames = getAnimationFramesForState(animState);
+    const sprite = frames.length ? frames[animState.frameIndex % frames.length] : null;
+    if (sprite) {
+      ctx.drawImage(sprite, screen.x - TILE_SIZE / 2, screen.y - TILE_SIZE / 2, TILE_SIZE, TILE_SIZE);
+    } else {
+      ctx.fillStyle = isSelf ? '#4ec3ff' : '#f7f7f7';
+      if (player.tagged) ctx.fillStyle = '#ffb26a';
+      ctx.fillRect(screen.x - 9, screen.y - 9, 18, 18);
+    }
 
     const dirX = player.facingX ?? 1;
     const dirY = player.facingY ?? 0;
