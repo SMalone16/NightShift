@@ -92,6 +92,7 @@ let loadedAssets = null;
 let socket = null;
 let selfId = null;
 let snapshot = null;
+let sharedSnapshot = null;
 const playerAnimTimers = new Map();
 
 const PLAYER_FRAME_MS = {
@@ -165,7 +166,17 @@ function connect(username) {
       joinPanel.classList.add('hidden');
       gamePanel.classList.remove('hidden');
     }
+    if (msg.type === 'snapshotShared') {
+      sharedSnapshot = msg.snapshot;
+      snapshot = { ...(snapshot || {}), ...(sharedSnapshot || {}) };
+      renderHud();
+    }
+    if (msg.type === 'snapshotDelta') {
+      snapshot = { ...(sharedSnapshot || snapshot || {}), ...(msg.snapshot || {}) };
+      renderHud();
+    }
     if (msg.type === 'snapshot') {
+      sharedSnapshot = msg.snapshot;
       snapshot = msg.snapshot;
       renderHud();
     }
