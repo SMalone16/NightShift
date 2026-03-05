@@ -65,6 +65,7 @@ class Game {
   constructor() {
     this.map = generateMap();
     this.mapStaticMetadata = this.buildMapStaticMetadata();
+    this.sharedNightMap = this.buildSharedNightMap();
     this.maskedMapCache = new Map();
     this.players = new Map();
     this.enemies = [];
@@ -89,6 +90,19 @@ class Game {
       checkpoints: this.map.checkpoints,
       spawns: this.map.spawns,
       zones: this.map.zones || [],
+    };
+  }
+
+  buildSharedNightMap() {
+    const tiles = Array.from(
+      { length: this.map.height },
+      () => Array.from({ length: this.map.width }, () => HIDDEN_TILE),
+    );
+
+    return {
+      ...this.mapStaticMetadata,
+      tiles,
+      safeZones: this.map.safeZones || [],
     };
   }
 
@@ -197,6 +211,7 @@ class Game {
     this.projectiles = [];
     this.map = generateMap();
     this.mapStaticMetadata = this.buildMapStaticMetadata();
+    this.sharedNightMap = this.buildSharedNightMap();
     this.maskedMapCache.clear();
     const spawns = this.map.spawns;
     let i = 0;
@@ -870,7 +885,7 @@ class Game {
       recipes: RECIPES,
       materials: MATERIALS,
       visibility: SPECIAL_TILE_VISIBILITY,
-      map: this.map,
+      map: isNight ? this.sharedNightMap : this.map,
       visionRadius: null,
     };
 
