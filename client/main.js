@@ -37,9 +37,73 @@ const gearInfo = document.getElementById('gearInfo');
 const teamInfo = document.getElementById('teamInfo');
 const eventsList = document.getElementById('events');
 
+const ASSETS = {
+  tiles: {
+    tree: 'client/assets/sprites/tiles/tree.png',
+    rock: 'client/assets/sprites/tiles/rock.png',
+    chestClosed: 'client/assets/sprites/tiles/chest_closed.png',
+  },
+  player: {
+    idle: {
+      down: 'client/assets/sprites/player/idle/down.png',
+    },
+    walk: {
+      left: [
+        'client/assets/sprites/player/walk/left_0.png',
+        'client/assets/sprites/player/walk/left_1.png',
+        'client/assets/sprites/player/walk/left_2.png',
+      ],
+    },
+    slingshot: {
+      fire: {
+        left: [
+          'client/assets/sprites/player/slingshot/fire_left_0.png',
+          'client/assets/sprites/player/slingshot/fire_left_1.png',
+          'client/assets/sprites/player/slingshot/fire_left_2.png',
+        ],
+      },
+    },
+  },
+};
+
+let assetsReady = false;
+let assetLoadError = null;
+let loadedAssets = null;
+
 let socket = null;
 let selfId = null;
 let snapshot = null;
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`Failed to load image: ${src}`));
+    image.src = src;
+  });
+}
+
+function preloadAssets(assetManifest) {
+  const loadRecursive = (value) => {
+    if (Array.isArray(value)) {
+      return Promise.all(value.map(loadRecursive));
+    }
+
+    if (value && typeof value === 'object') {
+      const entries = Object.entries(value);
+      return Promise.all(entries.map(async ([key, nestedValue]) => [key, await loadRecursive(nestedValue)]))
+        .then((resolvedEntries) => Object.fromEntries(resolvedEntries));
+    }
+
+    if (typeof value === 'string') {
+      return loadImage(value);
+    }
+
+    return Promise.resolve(value);
+  };
+
+  return loadRecursive(assetManifest);
+}
 
 const inputState = {
   up: false,
@@ -75,7 +139,6 @@ function connect(username) {
     }
     if (msg.type === 'snapshot') {
       snapshot = msg.snapshot;
-      render();
       renderHud();
     }
   });
@@ -239,6 +302,20 @@ function drawZoneOverlay(map, me, camera) {
   }
 }
 
+function drawLoadingState() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#10151d';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#e8edf5';
+  ctx.font = '20px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const message = assetLoadError ? 'Failed to load assets' : 'Loading assets...';
+  ctx.fillText(message, canvas.width / 2, canvas.height / 2);
+  ctx.textAlign = 'start';
+  ctx.textBaseline = 'alphabetic';
+}
+
 function render() {
   if (!snapshot) return;
   const map = snapshot.map;
@@ -377,3 +454,25 @@ function renderHud() {
 
   eventsList.innerHTML = snapshot.events.map((ev) => `<li>${ev.message}</li>`).join('');
 }
+
+function gameLoop() {
+  if (!assetsReady || assetLoadError) {
+    drawLoadingState();
+  } else {
+    render();
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+
+preloadAssets(ASSETS)
+  .then((resolvedAssets) => {
+    loadedAssets = resolvedAssets;
+    assetsReady = true;
+  })
+  .catch((error) => {
+    assetLoadError = error;
+    console.error(error);
+  });
+
+requestAnimationFrame(gameLoop);
