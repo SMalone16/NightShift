@@ -59,6 +59,8 @@ function spendMats(inv, cost) {
 class Game {
   constructor() {
     this.map = generateMap();
+    this.mapStaticMetadata = this.buildMapStaticMetadata();
+    this.maskedMapCache = new Map();
     this.players = new Map();
     this.enemies = [];
     this.projectiles = [];
@@ -70,6 +72,19 @@ class Game {
     this.nightNumber = 0;
     this.events = [];
     this.lastEnemySpawnTick = 0;
+  }
+
+  buildMapStaticMetadata() {
+    return {
+      width: this.map.width,
+      height: this.map.height,
+      worldWidth: this.map.worldWidth || this.map.width,
+      worldHeight: this.map.worldHeight || this.map.height,
+      objective: this.map.objective,
+      checkpoints: this.map.checkpoints,
+      spawns: this.map.spawns,
+      zones: this.map.zones || [],
+    };
   }
 
   addPlayer(clientId, username) {
@@ -108,6 +123,7 @@ class Game {
     if (!player) return;
     touchUser(player.username, { xp: player.xp, level: player.level });
     this.players.delete(clientId);
+    this.maskedMapCache.delete(clientId);
     this.logEvent(`${player.username} signed off.`);
   }
 
@@ -175,6 +191,8 @@ class Game {
     this.enemies = [];
     this.projectiles = [];
     this.map = generateMap();
+    this.mapStaticMetadata = this.buildMapStaticMetadata();
+    this.maskedMapCache.clear();
     const spawns = this.map.spawns;
     let i = 0;
     this.players.forEach((p) => {
@@ -621,52 +639,74 @@ class Game {
   }
 
   getVisibleTilesForPlayer(player, radius) {
-    const visible = Array.from({ length: this.map.height }, () => Array.from({ length: this.map.width }, () => false));
     const radiusSq = radius * radius;
     const px = player.x;
     const py = player.y;
+    const minX = clamp(Math.floor(px - radius), 0, this.map.width - 1);
+    const maxX = clamp(Math.ceil(px + radius), 0, this.map.width - 1);
+    const minY = clamp(Math.floor(py - radius), 0, this.map.height - 1);
+    const maxY = clamp(Math.ceil(py + radius), 0, this.map.height - 1);
+    const visibleByRow = new Map();
 
-    for (let y = 0; y < this.map.height; y += 1) {
-      for (let x = 0; x < this.map.width; x += 1) {
+    for (let y = minY; y <= maxY; y += 1) {
+      for (let x = minX; x <= maxX; x += 1) {
         const dx = x - px;
         const dy = y - py;
         if (dx * dx + dy * dy <= radiusSq) {
-          visible[y][x] = true;
+          const row = visibleByRow.get(y) || new Set();
+          row.add(x);
+          visibleByRow.set(y, row);
         }
       }
     }
 
     if (SPECIAL_TILE_VISIBILITY.checkpoint === 'always') {
       this.map.checkpoints.forEach((cp) => {
-        visible[cp.y][cp.x] = true;
+        const row = visibleByRow.get(cp.y) || new Set();
+        row.add(cp.x);
+        visibleByRow.set(cp.y, row);
       });
     }
 
     if (SPECIAL_TILE_VISIBILITY.objective === 'always') {
-      visible[this.map.objective.y][this.map.objective.x] = true;
+      const row = visibleByRow.get(this.map.objective.y) || new Set();
+      row.add(this.map.objective.x);
+      visibleByRow.set(this.map.objective.y, row);
     }
 
-    return visible;
+    return visibleByRow;
   }
 
-  getMaskedMapForPlayer(visibleTiles) {
-    const tiles = this.map.tiles.map((row, y) => row.map((tile, x) => {
-      if (!visibleTiles[y][x]) return HIDDEN_TILE;
-      return tile;
-    }));
+  getMaskedMapForPlayer(player, radius) {
+    const px = Math.round(player.x);
+    const py = Math.round(player.y);
+    const cacheKey = `${player.id}:${px}:${py}:${radius}`;
+    const cached = this.maskedMapCache.get(player.id);
+    if (cached && cached.key === cacheKey) {
+      return cached.map;
+    }
 
-    return {
-      width: this.map.width,
-      height: this.map.height,
-      worldWidth: this.map.worldWidth || this.map.width,
-      worldHeight: this.map.worldHeight || this.map.height,
+    const visibleTiles = this.getVisibleTilesForPlayer(player, radius);
+    const tiles = Array.from(
+      { length: this.map.height },
+      () => Array.from({ length: this.map.width }, () => HIDDEN_TILE),
+    );
+
+    visibleTiles.forEach((visibleColumns, y) => {
+      visibleColumns.forEach((x) => {
+        tiles[y][x] = this.map.tiles[y][x];
+      });
+    });
+
+    const maskedMap = {
+      ...this.mapStaticMetadata,
       tiles,
-      objective: this.map.objective,
-      checkpoints: this.map.checkpoints,
       safeZones: this.map.safeZones || [],
-      spawns: this.map.spawns,
-      zones: this.map.zones || [],
     };
+
+    this.maskedMapCache.set(player.id, { key: cacheKey, map: maskedMap });
+
+    return maskedMap;
   }
 
   getSnapshotForPlayer(clientId) {
@@ -675,10 +715,9 @@ class Game {
     const lightingMode = this.getLightingMode();
     const isNight = lightingMode === 'night';
     const visionRadius = player ? this.getVisionRadiusForPlayer(player) : 0;
-    const visibleTiles = player && isNight ? this.getVisibleTilesForPlayer(player, visionRadius) : null;
 
     return {
-      map: player && isNight ? this.getMaskedMapForPlayer(visibleTiles) : this.map,
+      map: player && isNight ? this.getMaskedMapForPlayer(player, visionRadius) : this.map,
       phase: this.phase,
       lightingMode,
       timer: Math.ceil(this.phaseTimer),
