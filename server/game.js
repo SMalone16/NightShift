@@ -1,4 +1,5 @@
 const { generateMap, isWalkable } = require('./map');
+const { findPathAStar } = require('./pathfinding');
 const {
   TILE,
   HIDDEN_TILE,
@@ -24,6 +25,9 @@ const TAG_DURATION = 1.0;
 const ATTACK_COOLDOWN = 0.45;
 const SAFE_ZONE_ATTACK_COOLDOWN = 0.9;
 const PLAYER_BUCKET_SIZE = 4;
+const ENEMY_PATH_RECALC_INTERVAL = 0.5;
+const ENEMY_PATH_GOAL_EPSILON = 0.15;
+const ENEMY_PATH_REACH_EPSILON = 0.08;
 
 function makeEmptyInventory() {
   return {
@@ -222,6 +226,10 @@ class Game {
         y: spawn.y,
         stunnedUntil: 0,
         zoneAttackCooldownUntil: 0,
+        path: [],
+        pathIndex: 0,
+        pathTargetKey: null,
+        nextPathRecalcAt: 0,
       });
     }
 
@@ -471,14 +479,10 @@ class Game {
       const targetX = target.type === 'zone' ? target.position.x : target.player.x;
       const targetY = target.type === 'zone' ? target.position.y : target.player.y;
 
-      const dx = Math.sign(targetX - enemy.x);
-      const dy = Math.sign(targetY - enemy.y);
-      const step = ENEMY_SPEED * dt;
-      const nx = enemy.x + dx * step;
-      const ny = enemy.y + dy * step;
-
-      if (this.canEnemyMoveTo(nx, enemy.y)) enemy.x = nx;
-      if (this.canEnemyMoveTo(enemy.x, ny)) enemy.y = ny;
+      const blocked = !this.followEnemyPath(enemy, { x: targetX, y: targetY }, dt, now);
+      if (blocked) {
+        enemy.nextPathRecalcAt = 0;
+      }
 
       if (target.type === 'zone') {
         this.tryAttackSafeZone(enemy, target.zone, target.position, now);
@@ -538,11 +542,100 @@ class Game {
   canEnemyMoveTo(x, y) {
     const tx = Math.round(x);
     const ty = Math.round(y);
-    const tile = this.map.tiles[ty]?.[tx];
-    if (tile === undefined) return false;
+    if (!this.isEnemyWalkableTile(tx, ty)) return false;
     const intactSafeZone = this.getSafeZoneAtPosition(tx, ty, true);
     if (intactSafeZone && !intactSafeZone.destroyed) return false;
+    return true;
+  }
+
+  isEnemyWalkableTile(tx, ty) {
+    const tile = this.map.tiles[ty]?.[tx];
+    if (tile === undefined) return false;
     return isWalkable(tile);
+  }
+
+  followEnemyPath(enemy, targetPos, dt, now) {
+    const startTile = this.getEnemyTilePosition(enemy);
+    const goalTile = { x: Math.round(targetPos.x), y: Math.round(targetPos.y) };
+    const goalKey = `${goalTile.x},${goalTile.y}`;
+    const needsRecalc = !enemy.path
+      || enemy.pathIndex >= enemy.path.length
+      || enemy.pathTargetKey !== goalKey
+      || now >= enemy.nextPathRecalcAt;
+
+    if (needsRecalc) {
+      enemy.path = this.computeEnemyPath(startTile, goalTile);
+      enemy.pathIndex = 0;
+      enemy.pathTargetKey = goalKey;
+      enemy.nextPathRecalcAt = now + ENEMY_PATH_RECALC_INTERVAL;
+    }
+
+    if (!enemy.path || enemy.path.length === 0) {
+      return false;
+    }
+
+    while (enemy.pathIndex < enemy.path.length) {
+      const tile = enemy.path[enemy.pathIndex];
+      if (!this.canEnemyMoveTo(tile.x, tile.y)) {
+        return false;
+      }
+
+      if (Math.abs(enemy.x - tile.x) <= ENEMY_PATH_REACH_EPSILON && Math.abs(enemy.y - tile.y) <= ENEMY_PATH_REACH_EPSILON) {
+        enemy.x = tile.x;
+        enemy.y = tile.y;
+        enemy.pathIndex += 1;
+        continue;
+      }
+
+      const moved = this.moveEnemyTowardPoint(enemy, tile.x, tile.y, ENEMY_SPEED * dt);
+      if (!moved) {
+        return false;
+      }
+
+      return true;
+    }
+
+    return this.moveEnemyTowardPoint(enemy, targetPos.x, targetPos.y, ENEMY_SPEED * dt, ENEMY_PATH_GOAL_EPSILON);
+  }
+
+  moveEnemyTowardPoint(enemy, targetX, targetY, maxStep, epsilon = ENEMY_PATH_REACH_EPSILON) {
+    const dx = targetX - enemy.x;
+    const dy = targetY - enemy.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance <= epsilon) {
+      enemy.x = targetX;
+      enemy.y = targetY;
+      return true;
+    }
+
+    const step = Math.min(maxStep, distance);
+    const nx = enemy.x + (dx / distance) * step;
+    const ny = enemy.y + (dy / distance) * step;
+
+    if (!this.canEnemyMoveTo(nx, ny)) {
+      return false;
+    }
+
+    enemy.x = nx;
+    enemy.y = ny;
+    return true;
+  }
+
+  computeEnemyPath(startTile, goalTile) {
+    return findPathAStar({
+      start: startTile,
+      goal: goalTile,
+      width: this.map.width,
+      height: this.map.height,
+      isWalkable: (x, y) => this.canEnemyMoveTo(x, y),
+    });
+  }
+
+  getEnemyTilePosition(enemy) {
+    return {
+      x: Math.round(enemy.x),
+      y: Math.round(enemy.y),
+    };
   }
 
   isPlayerInSafeZone(player) {
