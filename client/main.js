@@ -413,6 +413,130 @@ function drawZoneOverlay(map, me, camera) {
   }
 }
 
+
+function formatResourceLabel(material) {
+  return material.charAt(0).toUpperCase() + material.slice(1);
+}
+
+function drawHudPanel(x, y, width, height, title) {
+  ctx.save();
+  ctx.fillStyle = 'rgba(10, 14, 22, 0.72)';
+  ctx.strokeStyle = 'rgba(151, 173, 212, 0.42)';
+  ctx.lineWidth = 1;
+  ctx.fillRect(x, y, width, height);
+  ctx.strokeRect(x, y, width, height);
+  ctx.fillStyle = '#e8edf5';
+  ctx.font = '12px sans-serif';
+  ctx.fillText(title, x + 10, y + 17);
+  ctx.restore();
+}
+
+function drawMeter({ x, y, width, label, value, max, color, dim = false }) {
+  const safeMax = Math.max(0, Number(max) || 0);
+  const safeValue = clamp(Number(value) || 0, 0, safeMax || 1);
+  const ratio = safeMax > 0 ? safeValue / safeMax : 0;
+
+  ctx.save();
+  ctx.fillStyle = '#e8edf5';
+  ctx.font = dim ? '11px sans-serif' : '12px sans-serif';
+  ctx.fillText(`${label} ${Math.ceil(safeValue)}/${safeMax}`, x, y);
+
+  const barY = y + 6;
+  const barHeight = dim ? 6 : 8;
+  ctx.fillStyle = 'rgba(54, 64, 82, 0.95)';
+  ctx.fillRect(x, barY, width, barHeight);
+  ctx.fillStyle = dim ? 'rgba(130, 141, 160, 0.95)' : color;
+  ctx.fillRect(x, barY, width * ratio, barHeight);
+  ctx.strokeStyle = 'rgba(208, 221, 242, 0.45)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, barY, width, barHeight);
+  ctx.restore();
+}
+
+function drawGameplayHud(me, lightingMode) {
+  const combat = me.combat || {};
+  const batDurability = combat.batDurability || { current: 0, max: 0 };
+  const flashlightBattery = combat.flashlightBattery || { current: 0, max: 0 };
+  const equipped = me.selectedWeapon === 'slingshot' ? 'slingshot' : 'bat';
+  const ammo = Number(me.inventory?.pebbles || 0);
+
+  const panelX = 12;
+  const panelY = canvas.height - 172;
+  const panelWidth = 346;
+  const panelHeight = 160;
+  drawHudPanel(panelX, panelY, panelWidth, panelHeight, 'COMBAT HUD');
+
+  ctx.save();
+  ctx.font = '12px sans-serif';
+
+  const weaponY = panelY + 37;
+  const weaponWidth = 108;
+  ['bat', 'slingshot'].forEach((weapon, i) => {
+    const x = panelX + 10 + i * (weaponWidth + 8);
+    const active = equipped === weapon;
+    ctx.fillStyle = active ? 'rgba(88, 125, 194, 0.9)' : 'rgba(40, 50, 66, 0.9)';
+    ctx.strokeStyle = active ? '#d6e3ff' : '#7d8ca8';
+    ctx.lineWidth = active ? 2 : 1;
+    ctx.fillRect(x, weaponY, weaponWidth, 24);
+    ctx.strokeRect(x, weaponY, weaponWidth, 24);
+    ctx.fillStyle = '#e8edf5';
+    const label = weapon === 'bat' ? 'BAT' : 'SLINGSHOT';
+    ctx.fillText(active ? `${label} [EQUIPPED]` : label, x + 8, weaponY + 16);
+  });
+
+  drawMeter({
+    x: panelX + 10,
+    y: panelY + 78,
+    width: 160,
+    label: 'Bat Durability',
+    value: batDurability.current,
+    max: batDurability.max,
+    color: '#cb8f5c',
+    dim: equipped !== 'bat',
+  });
+
+  drawMeter({
+    x: panelX + 180,
+    y: panelY + 78,
+    width: 154,
+    label: 'Pebbles',
+    value: ammo,
+    max: Math.max(20, ammo || 0),
+    color: '#98a6ba',
+    dim: equipped !== 'slingshot',
+  });
+
+  drawMeter({
+    x: panelX + 10,
+    y: panelY + 116,
+    width: 324,
+    label: lightingMode === 'night' ? 'Flashlight Battery (ACTIVE)' : 'Flashlight Battery (CHARGING)',
+    value: flashlightBattery.current,
+    max: flashlightBattery.max,
+    color: '#dfd889',
+  });
+
+  const resources = Array.isArray(snapshot?.materials) ? snapshot.materials : Object.keys(me.inventory || {});
+  const resourcePanelWidth = 246;
+  const resourcePanelHeight = 122;
+  const resourceX = canvas.width - resourcePanelWidth - 12;
+  const resourceY = 12;
+  drawHudPanel(resourceX, resourceY, resourcePanelWidth, resourcePanelHeight, 'RESOURCES');
+
+  resources.forEach((material, idx) => {
+    const value = me.inventory?.[material] ?? 0;
+    ctx.fillStyle = '#d8e2f3';
+    ctx.font = '12px sans-serif';
+    const row = Math.floor(idx / 2);
+    const col = idx % 2;
+    const lineX = resourceX + 10 + col * 116;
+    const lineY = resourceY + 36 + row * 24;
+    ctx.fillText(`${formatResourceLabel(material)}: ${value}`, lineX, lineY);
+  });
+
+  ctx.restore();
+}
+
 function drawLoadingState() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = '#10151d';
@@ -551,6 +675,7 @@ function render() {
     ctx.restore();
   }
 
+  drawGameplayHud(me, lightingMode);
   drawZoneOverlay(map, me, camera);
 }
 
@@ -563,14 +688,18 @@ function renderHud() {
   const phaseLabel = lightingMode === 'day' ? 'DAY' : 'NIGHT';
   phaseInfo.innerHTML = `<strong>Cycle:</strong> ${phaseLabel} | <strong>Time:</strong> ${snapshot.timer}s`;
   playerInfo.innerHTML = `<strong>${me.username}</strong> — XP ${me.xp}, Level ${me.level}`;
-  inventoryInfo.innerHTML = `
-    <strong>Inventory</strong><br>
-    wood: ${me.inventory.wood} | stone: ${me.inventory.stone}<br>
-    cloth: ${me.inventory.cloth} | oil: ${me.inventory.oil} | pebbles: ${me.inventory.pebbles}
-  `;
+  const resources = Array.isArray(snapshot.materials) ? snapshot.materials : Object.keys(me.inventory || {});
+  inventoryInfo.innerHTML = [
+    '<strong>Resources</strong>',
+    ...resources.map((material) => `${formatResourceLabel(material)}: ${me.inventory?.[material] ?? 0}`),
+  ].join('<br>');
+
   const selectedWeaponLabel = me.selectedWeapon === 'slingshot' ? 'Slingshot' : 'Bat';
-  const flashlightStatus = lightingMode === 'night' ? `Active (range T${me.gear.torch})` : 'Standby (daylight)';
-  gearInfo.innerHTML = `<strong>Gear</strong><br>Torch T${me.gear.torch} | Bat T${me.gear.bat} | Slingshot T${me.gear.slingshot}<br><strong>Flashlight:</strong> ${flashlightStatus}<br><strong>Selected:</strong> ${selectedWeaponLabel} (Q to swap)`;
+  const batDurability = me.combat?.batDurability || { current: 0, max: 0 };
+  const flashlightBattery = me.combat?.flashlightBattery || { current: 0, max: 0 };
+  const flashlightStatus = me.flashlightActive ? 'Active' : (lightingMode === 'night' ? 'Empty battery' : 'Charging (day)');
+
+  gearInfo.innerHTML = `<strong>Gear</strong><br>Torch T${me.gear.torch} | Bat T${me.gear.bat} | Slingshot T${me.gear.slingshot}<br><strong>Selected:</strong> ${selectedWeaponLabel} (Q to swap)<br><strong>Pebbles:</strong> ${me.inventory.pebbles}<br><strong>Bat durability:</strong> ${Math.ceil(batDurability.current)}/${batDurability.max}<br><strong>Flashlight:</strong> ${Math.ceil(flashlightBattery.current)}/${flashlightBattery.max} (${flashlightStatus})`;
 
   const everyone = snapshot.players
     .map((p) => `${p.objectiveReached ? '✅' : '⬜'} ${p.username}`)

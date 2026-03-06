@@ -28,6 +28,21 @@ const PLAYER_BUCKET_SIZE = 4;
 const ENEMY_PATH_RECALC_INTERVAL = 0.5;
 const ENEMY_PATH_GOAL_EPSILON = 0.15;
 const ENEMY_PATH_REACH_EPSILON = 0.08;
+const FLASHLIGHT_DRAIN_PER_SECOND = 1;
+
+const BAT_DURABILITY_BY_TIER = {
+  0: 0,
+  1: 24,
+  2: 36,
+  3: 52,
+};
+
+const FLASHLIGHT_BATTERY_BY_TIER = {
+  0: 0,
+  1: 100,
+  2: 130,
+  3: 165,
+};
 
 function makeEmptyInventory() {
   return {
@@ -41,6 +56,20 @@ function makeEmptyInventory() {
 
 function makeGear() {
   return { torch: 0, bat: 0, slingshot: 0 };
+}
+
+// Combat-facing stats are authoritative on the server and mirrored to clients via snapshots.
+function makeCombatState() {
+  return {
+    batDurability: {
+      current: 0,
+      max: 0,
+    },
+    flashlightBattery: {
+      current: 0,
+      max: 0,
+    },
+  };
 }
 
 function clamp(v, min, max) {
@@ -123,6 +152,7 @@ class Game {
       selectedWeapon: 'bat',
       inventory: makeEmptyInventory(),
       gear: makeGear(),
+      combat: makeCombatState(),
       taggedUntil: 0,
       attackCooldownUntil: 0,
       lastAttackAt: 0,
@@ -290,6 +320,8 @@ class Game {
 
   updatePlayers(dt, now) {
     this.players.forEach((p) => {
+      this.updateFlashlightBattery(p, dt);
+
       const slow = now < p.taggedUntil ? 0.45 : 1;
       const dx = (p.inputs.right ? 1 : 0) - (p.inputs.left ? 1 : 0);
       const dy = (p.inputs.down ? 1 : 0) - (p.inputs.up ? 1 : 0);
@@ -355,6 +387,50 @@ class Game {
     player.selectedWeapon = weapon;
   }
 
+  // Flashlight battery drains at night while active and recharges instantly during day.
+  updateFlashlightBattery(player, dt) {
+    const maxBattery = this.getFlashlightBatteryMax(player.gear.torch);
+    const battery = player.combat.flashlightBattery;
+    battery.max = maxBattery;
+
+    if (maxBattery <= 0) {
+      battery.current = 0;
+      return;
+    }
+
+    if (this.phase === PHASES.DAY) {
+      battery.current = maxBattery;
+      return;
+    }
+
+    battery.current = clamp(battery.current - (FLASHLIGHT_DRAIN_PER_SECOND * dt), 0, maxBattery);
+  }
+
+  isFlashlightActive(player) {
+    return this.phase === PHASES.NIGHT
+      && player.gear.torch > 0
+      && player.combat.flashlightBattery.current > 0;
+  }
+
+  getFlashlightBatteryMax(torchTier) {
+    return FLASHLIGHT_BATTERY_BY_TIER[torchTier] || 0;
+  }
+
+  getBatDurabilityMax(batTier) {
+    return BAT_DURABILITY_BY_TIER[batTier] || 0;
+  }
+
+  setWeaponFallback(player) {
+    if (player.selectedWeapon === 'bat' && player.gear.bat <= 0 && player.gear.slingshot > 0) {
+      player.selectedWeapon = 'slingshot';
+      return;
+    }
+
+    if (player.selectedWeapon === 'slingshot' && player.gear.slingshot <= 0 && player.gear.bat > 0) {
+      player.selectedWeapon = 'bat';
+    }
+  }
+
   tryMovePlayer(player, nx, ny) {
     const tx = Math.round(nx);
     const ty = Math.round(ny);
@@ -416,6 +492,7 @@ class Game {
       if (player.gear[item] < 1 && hasMats(player.inventory, RECIPES[item].base)) {
         spendMats(player.inventory, RECIPES[item].base);
         player.gear[item] = 1;
+        this.applyGearStats(player, item);
         this.logEvent(`${player.username} crafted ${item} T1.`);
         return;
       }
@@ -425,14 +502,37 @@ class Game {
       if (player.gear[item] >= 1 && player.gear[item] < 3 && hasMats(player.inventory, RECIPES[item].upgrade)) {
         spendMats(player.inventory, RECIPES[item].upgrade);
         player.gear[item] += 1;
+        this.applyGearStats(player, item);
         this.logEvent(`${player.username} upgraded ${item} to T${player.gear[item]}.`);
         return;
       }
     }
   }
 
+  // Keep stat initialization tied to crafted/upgraded gear to avoid client-side duplication.
+  applyGearStats(player, item) {
+    if (item === 'bat') {
+      const maxDurability = this.getBatDurabilityMax(player.gear.bat);
+      player.combat.batDurability.max = maxDurability;
+      player.combat.batDurability.current = maxDurability;
+      return;
+    }
+
+    if (item === 'torch') {
+      const maxBattery = this.getFlashlightBatteryMax(player.gear.torch);
+      player.combat.flashlightBattery.max = maxBattery;
+      player.combat.flashlightBattery.current = maxBattery;
+    }
+  }
+
   handleAttack(player, now) {
     if (player.selectedWeapon === 'slingshot' && player.gear.slingshot > 0) {
+      if ((player.inventory.pebbles || 0) <= 0) {
+        this.logEvent(`${player.username} tried to fire slingshot, but has no pebbles.`);
+        return;
+      }
+
+      player.inventory.pebbles -= 1;
       player.lastAttackAt = now;
       player.lastAttackType = 'fire';
       const dirMag = Math.hypot(player.facingX, player.facingY) || 1;
@@ -457,6 +557,15 @@ class Game {
     }
 
     if (player.selectedWeapon === 'bat' && player.gear.bat > 0) {
+      const durability = player.combat.batDurability;
+      if (durability.current <= 0) {
+        player.gear.bat = 0;
+        this.setWeaponFallback(player);
+        this.logEvent(`${player.username}'s bat broke.`);
+        return;
+      }
+
+      durability.current = Math.max(0, durability.current - 1);
       player.lastAttackAt = now;
       player.lastAttackType = 'swing';
       this.enemies.forEach((e) => {
@@ -465,6 +574,13 @@ class Game {
         }
       });
       this.logEvent(`${player.username} swung bat.`);
+
+      if (durability.current <= 0) {
+        player.gear.bat = 0;
+        durability.max = 0;
+        this.setWeaponFallback(player);
+        this.logEvent(`${player.username}'s bat broke.`);
+      }
     }
   }
 
@@ -770,7 +886,8 @@ class Game {
     if (this.getLightingMode() === 'day') {
       return Infinity;
     }
-    return VISION_RADIUS_BASE_TILES + player.gear.torch * VISION_RADIUS_PER_TORCH_TIER;
+    const flashlightTier = this.isFlashlightActive(player) ? player.gear.torch : 0;
+    return VISION_RADIUS_BASE_TILES + flashlightTier * VISION_RADIUS_PER_TORCH_TIER;
   }
 
   isWithinVision(player, entity, radius) {
@@ -861,6 +978,8 @@ class Game {
           facingY: p.facingY,
           inventory: p.inventory,
           gear: p.gear,
+          combat: p.combat,
+          flashlightActive: this.isFlashlightActive(p),
           selectedWeapon: p.selectedWeapon,
           tagged: now < p.taggedUntil,
           lastAttackAt: p.lastAttackAt,
