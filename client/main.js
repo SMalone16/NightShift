@@ -565,7 +565,7 @@ function render() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   if (lightingMode === 'day') {
-    ctx.fillStyle = '#b9e5ff';
+    ctx.fillStyle = DAY_COLORS[TILE.GRASS];
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
 
