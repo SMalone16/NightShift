@@ -457,13 +457,14 @@ function drawGameplayHud(me, lightingMode) {
   const combat = me.combat || {};
   const batDurability = combat.batDurability || { current: 0, max: 0 };
   const flashlightBattery = combat.flashlightBattery || { current: 0, max: 0 };
+  const health = me.health || { current: 0, max: 0 };
   const equipped = me.selectedWeapon === 'slingshot' ? 'slingshot' : 'bat';
   const ammo = Number(me.inventory?.pebbles || 0);
 
   const panelX = 12;
-  const panelY = canvas.height - 172;
+  const panelY = canvas.height - 208;
   const panelWidth = 346;
-  const panelHeight = 160;
+  const panelHeight = 196;
   drawHudPanel(panelX, panelY, panelWidth, panelHeight, 'COMBAT HUD');
 
   ctx.save();
@@ -509,6 +510,16 @@ function drawGameplayHud(me, lightingMode) {
   drawMeter({
     x: panelX + 10,
     y: panelY + 116,
+    width: 324,
+    label: 'Health',
+    value: health.current,
+    max: health.max,
+    color: '#d95f5f',
+  });
+
+  drawMeter({
+    x: panelX + 10,
+    y: panelY + 148,
     width: 324,
     label: lightingMode === 'night' ? 'Flashlight Battery (ACTIVE)' : 'Flashlight Battery (CHARGING)',
     value: flashlightBattery.current,
@@ -644,6 +655,21 @@ function render() {
     ctx.lineTo(tipX, tipY);
     ctx.stroke();
 
+    if (player.health?.max > 0) {
+      const barWidth = 26;
+      const barHeight = 4;
+      const ratio = clamp((player.health.current || 0) / player.health.max, 0, 1);
+      const barX = screen.x - (barWidth / 2);
+      const barY = screen.y - 22;
+      ctx.fillStyle = 'rgba(15, 20, 26, 0.9)';
+      ctx.fillRect(barX, barY, barWidth, barHeight);
+      ctx.fillStyle = player.id === selfId ? '#7de18a' : '#d95f5f';
+      ctx.fillRect(barX, barY, barWidth * ratio, barHeight);
+      ctx.strokeStyle = 'rgba(228, 238, 255, 0.45)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(barX, barY, barWidth, barHeight);
+    }
+
     ctx.fillStyle = '#10151d';
     ctx.font = '12px sans-serif';
     ctx.fillText(player.username, screen.x - 20, screen.y - 12);
@@ -687,7 +713,8 @@ function renderHud() {
   const lightingMode = getLightingMode();
   const phaseLabel = lightingMode === 'day' ? 'DAY' : 'NIGHT';
   phaseInfo.innerHTML = `<strong>Cycle:</strong> ${phaseLabel} | <strong>Time:</strong> ${snapshot.timer}s`;
-  playerInfo.innerHTML = `<strong>${me.username}</strong> — XP ${me.xp}, Level ${me.level}`;
+  const health = me.health || { current: 0, max: 0 };
+  playerInfo.innerHTML = `<strong>${me.username}</strong> — XP ${me.xp}, Level ${me.level}, HP ${Math.ceil(health.current)}/${health.max}`;
   const resources = Array.isArray(snapshot.materials) ? snapshot.materials : Object.keys(me.inventory || {});
   inventoryInfo.innerHTML = [
     '<strong>Resources</strong>',

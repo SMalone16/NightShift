@@ -29,6 +29,10 @@ const ENEMY_PATH_RECALC_INTERVAL = 0.5;
 const ENEMY_PATH_GOAL_EPSILON = 0.15;
 const ENEMY_PATH_REACH_EPSILON = 0.08;
 const FLASHLIGHT_DRAIN_PER_SECOND = 1;
+const PLAYER_HEALTH_MAX = 100;
+const ENEMY_CONTACT_DAMAGE = 20;
+const ENEMY_CONTACT_DAMAGE_COOLDOWN = 1.1;
+const PLAYER_RESPAWN_INVULNERABILITY = 2.5;
 
 const BAT_DURABILITY_BY_TIER = {
   0: 0,
@@ -69,6 +73,13 @@ function makeCombatState() {
       current: 0,
       max: 0,
     },
+  };
+}
+
+function makeHealthState() {
+  return {
+    current: PLAYER_HEALTH_MAX,
+    max: PLAYER_HEALTH_MAX,
   };
 }
 
@@ -153,7 +164,11 @@ class Game {
       inventory: makeEmptyInventory(),
       gear: makeGear(),
       combat: makeCombatState(),
+      health: makeHealthState(),
       taggedUntil: 0,
+      enemyContactCooldownUntil: 0,
+      invulnerableUntil: 0,
+      downs: 0,
       attackCooldownUntil: 0,
       lastAttackAt: 0,
       lastAttackType: null,
@@ -251,6 +266,9 @@ class Game {
       p.y = s.y;
       p.objectiveReached = false;
       p.taggedUntil = now;
+      p.enemyContactCooldownUntil = 0;
+      p.invulnerableUntil = now;
+      p.health = makeHealthState();
       p.safeZoneState = { entranceZoneId: null, activeZoneId: null };
       i += 1;
     });
@@ -621,9 +639,42 @@ class Game {
       }
 
       if (Math.abs(enemy.x - target.player.x) < 0.75 && Math.abs(enemy.y - target.player.y) < 0.75) {
-        target.player.taggedUntil = now + TAG_DURATION;
+        this.applyEnemyContactDamage(target.player, now);
       }
     });
+  }
+
+  applyEnemyContactDamage(player, now) {
+    if (now < player.enemyContactCooldownUntil || now < player.invulnerableUntil) return;
+
+    player.enemyContactCooldownUntil = now + ENEMY_CONTACT_DAMAGE_COOLDOWN;
+    player.taggedUntil = now + TAG_DURATION;
+    player.health.current = clamp(player.health.current - ENEMY_CONTACT_DAMAGE, 0, player.health.max);
+
+    if (player.health.current > 0) return;
+
+    this.handlePlayerDowned(player, now);
+  }
+
+  handlePlayerDowned(player, now) {
+    const spawn = this.getSpawnForPlayer(player.id);
+    player.x = spawn.x;
+    player.y = spawn.y;
+    player.health.current = player.health.max;
+    player.invulnerableUntil = now + PLAYER_RESPAWN_INVULNERABILITY;
+    player.enemyContactCooldownUntil = now + PLAYER_RESPAWN_INVULNERABILITY;
+    player.taggedUntil = player.invulnerableUntil;
+    player.objectiveReached = false;
+    player.safeZoneState = { entranceZoneId: null, activeZoneId: null };
+    player.downs = (player.downs || 0) + 1;
+
+    this.logEvent(`${player.username} was downed and respawned at camp.`);
+  }
+
+  getSpawnForPlayer(playerId) {
+    const playerIds = [...this.players.keys()];
+    const playerIndex = Math.max(0, playerIds.indexOf(playerId));
+    return this.map.spawns[playerIndex % this.map.spawns.length];
   }
 
   buildEnemyTargetingContext() {
@@ -979,7 +1030,9 @@ class Game {
           inventory: p.inventory,
           gear: p.gear,
           combat: p.combat,
+          health: p.health,
           flashlightActive: this.isFlashlightActive(p),
+          invulnerable: now < p.invulnerableUntil,
           selectedWeapon: p.selectedWeapon,
           tagged: now < p.taggedUntil,
           lastAttackAt: p.lastAttackAt,
