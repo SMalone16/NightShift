@@ -39,6 +39,7 @@ const RECIPES = {
 };
 
 const MATERIALS = ['wood', 'stone', 'cloth', 'oil', 'pebbles'];
+const ALLOWED_CHARACTERS = ['ranger', 'scout', 'medic'];
 
 const HIDDEN_TILE = 99;
 const VISION_RADIUS_BASE_TILES = 4;
@@ -66,6 +67,7 @@ module.exports = {
   PHASE_LENGTH_SECONDS,
   RECIPES,
   MATERIALS,
+  ALLOWED_CHARACTERS,
   VISION_RADIUS_BASE_TILES,
   VISION_RADIUS_PER_TORCH_TIER,
   SPECIAL_TILE_VISIBILITY,

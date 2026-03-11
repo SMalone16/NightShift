@@ -3,6 +3,7 @@ const http = require('http');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 const { Game } = require('./game');
+const { ALLOWED_CHARACTERS } = require('./constants');
 
 const PORT = process.env.PORT || 3000;
 const TICK_RATE = 60;
@@ -41,8 +42,10 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'join' && typeof msg.username === 'string') {
       const username = msg.username.trim().slice(0, 20) || `Ranger-${clientId}`;
-      const player = game.addPlayer(clientId, username);
-      send(ws, { type: 'joined', playerId: player.id, username: player.username });
+      const incomingCharacter = typeof msg.character === 'string' ? msg.character.trim().toLowerCase() : '';
+      const character = ALLOWED_CHARACTERS.includes(incomingCharacter) ? incomingCharacter : ALLOWED_CHARACTERS[0];
+      const player = game.addPlayer(clientId, username, character);
+      send(ws, { type: 'joined', playerId: player.id, username: player.username, character: player.character });
       return;
     }
 

@@ -86,7 +86,7 @@ process.once('beforeExit', () => flushUsers());
 function getUserProfile(username) {
   const users = loadUsers();
   if (!users[username]) {
-    users[username] = { xp: 0, level: 1 };
+    users[username] = { xp: 0, level: 1, character: 'ranger' };
     markUserDirty(username);
   }
   return users[username];
@@ -109,6 +109,7 @@ function touchUser(username, profile) {
   users[username] = {
     xp: profile.xp,
     level: profile.level,
+    character: profile.character || 'ranger',
   };
   markUserDirty(username);
 }

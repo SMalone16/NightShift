@@ -94,3 +94,39 @@ button {
   color: #9aa9bd;
   font-size: 13px;
 }
+
+
+.character-picker {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid #3e4450;
+  border-radius: 8px;
+  background: #1c2129;
+}
+
+.character-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #b8c7dd;
+}
+
+.character-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.character-option {
+  font-size: 13px;
+}
+
+.character-option.selected {
+  border-color: #7da7ff;
+  background: #2c3f65;
+}
+
+.character-selected {
+  margin: 10px 0 0;
+  color: #c7d6ec;
+  font-size: 13px;
+}

@@ -15,6 +15,15 @@
           <input id="usernameInput" maxlength="20" placeholder="Username" />
           <button id="joinBtn">Join</button>
         </div>
+        <div class="character-picker" role="group" aria-label="Choose character">
+          <p class="character-title">Select Character</p>
+          <div class="character-options">
+            <button type="button" class="character-option selected" data-character="ranger">Ranger</button>
+            <button type="button" class="character-option" data-character="scout">Scout</button>
+            <button type="button" class="character-option" data-character="medic">Medic</button>
+          </div>
+          <p class="character-selected">Selected: <strong id="characterSelectedLabel">Ranger</strong></p>
+        </div>
         <p class="hint">Open multiple tabs to simulate multiplayer.</p>
       </section>
 

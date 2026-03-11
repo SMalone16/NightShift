@@ -16,6 +16,7 @@ const {
   ENEMY_SPAWN_PLAYER_BUFFER,
   ENEMY_SPAWN_CHECKPOINT_BUFFER,
   ENEMY_SPAWN_OBJECTIVE_BUFFER,
+  ALLOWED_CHARACTERS,
 } = require('./constants');
 const { getUserProfile, addXp, touchUser } = require('./persistence');
 
@@ -88,6 +89,12 @@ function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
+
+function sanitizeCharacter(character) {
+  const candidate = typeof character === 'string' ? character.trim().toLowerCase() : '';
+  return ALLOWED_CHARACTERS.includes(candidate) ? candidate : ALLOWED_CHARACTERS[0];
+}
+
 function distManhattan(a, b) {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
@@ -147,12 +154,14 @@ class Game {
     };
   }
 
-  addPlayer(clientId, username) {
+  addPlayer(clientId, username, selectedCharacter) {
     const spawn = this.map.spawns[this.players.size % this.map.spawns.length];
     const profile = getUserProfile(username);
+    const character = sanitizeCharacter(selectedCharacter || profile.character);
     const player = {
       id: clientId,
       username,
+      character,
       x: spawn.x,
       y: spawn.y,
       facingX: 1,
@@ -179,6 +188,7 @@ class Game {
       safeZoneState: { entranceZoneId: null, activeZoneId: null },
     };
     this.players.set(clientId, player);
+    touchUser(username, { xp: player.xp, level: player.level, character: player.character });
     this.logEvent(`${username} joined the shift.`);
     return player;
   }
@@ -186,7 +196,7 @@ class Game {
   removePlayer(clientId) {
     const player = this.players.get(clientId);
     if (!player) return;
-    touchUser(player.username, { xp: player.xp, level: player.level });
+    touchUser(player.username, { xp: player.xp, level: player.level, character: player.character });
     this.players.delete(clientId);
     this.maskedMapCache.delete(clientId);
     this.logEvent(`${player.username} signed off.`);
@@ -1086,6 +1096,7 @@ class Game {
         .map((p) => ({
           id: p.id,
           username: p.username,
+          character: p.character,
           x: p.x,
           y: p.y,
           facingX: p.facingX,
