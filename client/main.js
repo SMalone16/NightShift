@@ -625,6 +625,21 @@ function render() {
     const stunned = enemy.stunnedUntil > Date.now() / 1000;
     ctx.fillStyle = stunned ? '#c47dfa' : '#c53939';
     ctx.fillRect(screen.x - 10, screen.y - 10, 20, 20);
+
+    if ((enemy.maxHp || 0) > 0) {
+      const ratio = clamp((enemy.hp || 0) / enemy.maxHp, 0, 1);
+      const barWidth = 18;
+      const barHeight = 3;
+      const barX = screen.x - (barWidth / 2);
+      const barY = screen.y - 16;
+      ctx.fillStyle = 'rgba(15, 20, 26, 0.9)';
+      ctx.fillRect(barX, barY, barWidth, barHeight);
+      ctx.fillStyle = '#88df75';
+      ctx.fillRect(barX, barY, barWidth * ratio, barHeight);
+      ctx.strokeStyle = 'rgba(228, 238, 255, 0.45)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(barX, barY, barWidth, barHeight);
+    }
   });
 
   snapshot.players.forEach((player) => {

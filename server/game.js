@@ -33,6 +33,7 @@ const PLAYER_HEALTH_MAX = 100;
 const ENEMY_CONTACT_DAMAGE = 20;
 const ENEMY_CONTACT_DAMAGE_COOLDOWN = 1.1;
 const PLAYER_RESPAWN_INVULNERABILITY = 2.5;
+const ENEMY_HEALTH_BASE = 3;
 
 const BAT_DURABILITY_BY_TIER = {
   0: 0,
@@ -287,6 +288,8 @@ class Game {
         id: this.nextEnemyId++,
         x: spawn.x,
         y: spawn.y,
+        hp: ENEMY_HEALTH_BASE,
+        maxHp: ENEMY_HEALTH_BASE,
         stunnedUntil: 0,
         zoneAttackCooldownUntil: 0,
         path: [],
@@ -586,11 +589,29 @@ class Game {
       durability.current = Math.max(0, durability.current - 1);
       player.lastAttackAt = now;
       player.lastAttackType = 'swing';
+
+      const defeatedEnemyIds = [];
+      const swingToken = `swing:${player.id}:${now.toFixed(3)}`;
       this.enemies.forEach((e) => {
         if (Math.abs(e.x - player.x) <= 1 && Math.abs(e.y - player.y) <= 1) {
-          e.stunnedUntil = now + 0.5 + 0.2 * player.gear.bat;
+          const wasDefeated = this.applyDamageToEnemy(e, {
+            now,
+            damage: 1,
+            stunDuration: 0.5 + 0.2 * player.gear.bat,
+            sourceToken: `${swingToken}:${e.id}`,
+            attackerName: player.username,
+            sourceType: 'bat',
+          });
+          if (wasDefeated) {
+            defeatedEnemyIds.push(e.id);
+          }
         }
       });
+
+      if (defeatedEnemyIds.length > 0) {
+        this.enemies = this.enemies.filter((enemy) => !defeatedEnemyIds.includes(enemy.id));
+      }
+
       this.logEvent(`${player.username} swung bat.`);
 
       if (durability.current <= 0) {
@@ -607,14 +628,56 @@ class Game {
       proj.ttl -= dt;
       proj.x += proj.vx * dt;
       proj.y += proj.vy * dt;
-      this.enemies.forEach((e) => {
+
+      let defeatedEnemyId = null;
+      const ownerName = this.players.get(proj.ownerId)?.username || 'Unknown';
+      for (let i = 0; i < this.enemies.length; i += 1) {
+        const e = this.enemies[i];
         if (Math.abs(e.x - proj.x) < 0.7 && Math.abs(e.y - proj.y) < 0.7) {
-          e.stunnedUntil = Math.max(e.stunnedUntil, now + proj.stun);
+          const wasDefeated = this.applyDamageToEnemy(e, {
+            now,
+            damage: 1,
+            stunDuration: proj.stun,
+            sourceToken: `projectile:${proj.id}:${e.id}`,
+            attackerName: ownerName,
+            sourceType: 'projectile',
+          });
+          if (wasDefeated) {
+            defeatedEnemyId = e.id;
+          }
           proj.ttl = 0;
+          break;
         }
-      });
+      }
+
+      if (defeatedEnemyId !== null) {
+        this.enemies = this.enemies.filter((enemy) => enemy.id !== defeatedEnemyId);
+      }
     });
     this.projectiles = this.projectiles.filter((p) => p.ttl > 0 && this.isTileWalkable(Math.round(p.x), Math.round(p.y)));
+  }
+
+  applyDamageToEnemy(enemy, { now, damage, stunDuration = 0, sourceToken, attackerName = 'Unknown', sourceType = 'attack' }) {
+    if (!enemy || enemy.hp <= 0) return false;
+    if (sourceToken && enemy.lastDamageSourceToken === sourceToken) {
+      return false;
+    }
+
+    if (sourceToken) {
+      enemy.lastDamageSourceToken = sourceToken;
+    }
+
+    if (stunDuration > 0) {
+      enemy.stunnedUntil = Math.max(enemy.stunnedUntil, now + stunDuration);
+    }
+
+    enemy.hp = Math.max(0, (enemy.hp || 0) - damage);
+    if (enemy.hp > 0) {
+      return false;
+    }
+
+    this.logEvent(`Enemy ${enemy.id} defeated by ${attackerName} (${sourceType}).`);
+    return true;
   }
 
   updateEnemies(dt, now) {
@@ -1041,7 +1104,17 @@ class Game {
           xp: p.xp,
           level: p.level,
         })),
-      enemies: this.enemies.filter((e) => !player || !isNight || this.isWithinVision(player, e, visionRadius)),
+      enemies: this.enemies
+        .filter((e) => !player || !isNight || this.isWithinVision(player, e, visionRadius))
+        .map((e) => ({
+          id: e.id,
+          x: e.x,
+          y: e.y,
+          hp: e.hp,
+          maxHp: e.maxHp,
+          stunnedUntil: e.stunnedUntil,
+        })),
+
       projectiles: this.projectiles.filter((proj) => !player || !isNight || this.isWithinVision(player, proj, visionRadius)),
     };
   }
