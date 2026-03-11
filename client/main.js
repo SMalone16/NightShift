@@ -46,6 +46,8 @@ const joinPanel = document.getElementById('joinPanel');
 const gamePanel = document.getElementById('gamePanel');
 const usernameInput = document.getElementById('usernameInput');
 const joinBtn = document.getElementById('joinBtn');
+const characterSelectedLabel = document.getElementById('characterSelectedLabel');
+const characterOptionButtons = Array.from(document.querySelectorAll('.character-option'));
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
@@ -56,30 +58,48 @@ const gearInfo = document.getElementById('gearInfo');
 const teamInfo = document.getElementById('teamInfo');
 const eventsList = document.getElementById('events');
 
+const AVAILABLE_CHARACTERS = ['ranger', 'scout', 'medic'];
+
+const BASE_PLAYER_ASSET_SET = {
+  idle: {
+    down: 'assets/sprites/player/idle/down.png',
+  },
+  walk: {
+    left: [
+      'assets/sprites/player/walk/left_0.png',
+      'assets/sprites/player/walk/left_1.png',
+      'assets/sprites/player/walk/left_2.png',
+    ],
+  },
+  slingshot: {
+    fire: {
+      left: [
+        'assets/sprites/player/slingshot/fire_left_0.png',
+        'assets/sprites/player/slingshot/fire_left_1.png',
+        'assets/sprites/player/slingshot/fire_left_2.png',
+      ],
+    },
+  },
+};
+
 const ASSETS = {
   tiles: {
     tree: 'assets/sprites/tiles/tree.png',
     rock: 'assets/sprites/tiles/rock.png',
     chestClosed: 'assets/sprites/tiles/chest_closed.png',
   },
-  player: {
-    idle: {
-      down: 'assets/sprites/player/idle/down.png',
+  characters: {
+    ranger: BASE_PLAYER_ASSET_SET,
+    scout: {
+      ...BASE_PLAYER_ASSET_SET,
+      idle: {
+        down: 'assets/sprites/player/scout/idle/down.png',
+      },
     },
-    walk: {
-      left: [
-        'assets/sprites/player/walk/left_0.png',
-        'assets/sprites/player/walk/left_1.png',
-        'assets/sprites/player/walk/left_2.png',
-      ],
-    },
-    slingshot: {
-      fire: {
-        left: [
-          'assets/sprites/player/slingshot/fire_left_0.png',
-          'assets/sprites/player/slingshot/fire_left_1.png',
-          'assets/sprites/player/slingshot/fire_left_2.png',
-        ],
+    medic: {
+      ...BASE_PLAYER_ASSET_SET,
+      idle: {
+        down: 'assets/sprites/player/medic/idle/down.png',
       },
     },
   },
@@ -94,6 +114,7 @@ let selfId = null;
 let snapshot = null;
 let sharedSnapshot = null;
 const playerAnimTimers = new Map();
+let selectedCharacter = 'ranger';
 
 const PLAYER_FRAME_MS = {
   idle: 280,
@@ -104,10 +125,13 @@ const PLAYER_FRAME_MS = {
 const ATTACK_ACTION_WINDOW_SECONDS = 0.22;
 
 function loadImage(src) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const image = new Image();
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error(`Failed to load image: ${src}`));
+    image.onerror = () => {
+      console.warn(`Missing sprite asset, using fallback: ${src}`);
+      resolve(null);
+    };
     image.src = src;
   });
 }
@@ -144,16 +168,36 @@ const inputState = {
   swapWeapon: false,
 };
 
-joinBtn.addEventListener('click', () => {
-  const username = usernameInput.value.trim() || `Ranger-${Math.floor(Math.random() * 999)}`;
-  connect(username);
+function setSelectedCharacter(character) {
+  if (!AVAILABLE_CHARACTERS.includes(character)) return;
+  selectedCharacter = character;
+  if (characterSelectedLabel) {
+    characterSelectedLabel.textContent = character.charAt(0).toUpperCase() + character.slice(1);
+  }
+
+  characterOptionButtons.forEach((button) => {
+    button.classList.toggle('selected', button.dataset.character === character);
+  });
+}
+
+characterOptionButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    setSelectedCharacter(button.dataset.character || 'ranger');
+  });
 });
 
-function connect(username) {
+setSelectedCharacter(selectedCharacter);
+
+joinBtn.addEventListener('click', () => {
+  const username = usernameInput.value.trim() || `Ranger-${Math.floor(Math.random() * 999)}`;
+  connect(username, selectedCharacter);
+});
+
+function connect(username, character) {
   socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
 
   socket.addEventListener('open', () => {
-    socket.send(JSON.stringify({ type: 'join', username }));
+    socket.send(JSON.stringify({ type: 'join', username, character }));
   });
 
   socket.addEventListener('message', (evt) => {
@@ -322,24 +366,26 @@ function getPlayerAnimState(player, now) {
   };
 }
 
-function getAnimationFramesForState(animState) {
+function getAnimationFramesForState(animState, character = 'ranger') {
   const direction = animState.direction;
-  const actionFrames = loadedAssets?.player?.[animState.weaponPosture]?.[animState.action]?.[direction];
+  const activeCharacterAssets = loadedAssets?.characters?.[character] || loadedAssets?.characters?.ranger;
+
+  const actionFrames = activeCharacterAssets?.[animState.weaponPosture]?.[animState.action]?.[direction];
   if (Array.isArray(actionFrames) && actionFrames.length) {
     return actionFrames;
   }
 
-  const locomotionFrames = loadedAssets?.player?.[animState.locomotion]?.[direction];
+  const locomotionFrames = activeCharacterAssets?.[animState.locomotion]?.[direction];
   if (Array.isArray(locomotionFrames) && locomotionFrames.length) {
     return locomotionFrames;
   }
 
-  const fallbackWalkFrames = loadedAssets?.player?.walk?.left;
+  const fallbackWalkFrames = activeCharacterAssets?.walk?.left || loadedAssets?.characters?.ranger?.walk?.left;
   if (Array.isArray(fallbackWalkFrames) && fallbackWalkFrames.length && animState.locomotion === 'walk') {
     return fallbackWalkFrames;
   }
 
-  const idleDown = loadedAssets?.player?.idle?.down;
+  const idleDown = activeCharacterAssets?.idle?.down || loadedAssets?.characters?.ranger?.idle?.down;
   if (idleDown) return [idleDown];
   return [];
 }
@@ -648,7 +694,7 @@ function render() {
     if (!isOnScreen(screen.x, screen.y, 24)) return;
 
     const animState = getPlayerAnimState(player, now);
-    const frames = getAnimationFramesForState(animState);
+    const frames = getAnimationFramesForState(animState, player.character);
     const sprite = frames.length ? frames[animState.frameIndex % frames.length] : null;
     if (sprite) {
       ctx.drawImage(sprite, screen.x - TILE_SIZE / 2, screen.y - TILE_SIZE / 2, TILE_SIZE, TILE_SIZE);
@@ -729,7 +775,7 @@ function renderHud() {
   const phaseLabel = lightingMode === 'day' ? 'DAY' : 'NIGHT';
   phaseInfo.innerHTML = `<strong>Cycle:</strong> ${phaseLabel} | <strong>Time:</strong> ${snapshot.timer}s`;
   const health = me.health || { current: 0, max: 0 };
-  playerInfo.innerHTML = `<strong>${me.username}</strong> — XP ${me.xp}, Level ${me.level}, HP ${Math.ceil(health.current)}/${health.max}`;
+  playerInfo.innerHTML = `<strong>${me.username}</strong> (${(me.character || 'ranger').toUpperCase()}) — XP ${me.xp}, Level ${me.level}, HP ${Math.ceil(health.current)}/${health.max}`;
   const resources = Array.isArray(snapshot.materials) ? snapshot.materials : Object.keys(me.inventory || {});
   inventoryInfo.innerHTML = [
     '<strong>Resources</strong>',
