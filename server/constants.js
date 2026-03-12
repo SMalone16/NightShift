@@ -14,11 +14,13 @@ const MAP_WIDTH = 64;
 const MAP_HEIGHT = 40;
 
 const PHASES = {
+  LOBBY: 'lobby',
   DAY: 'day',
   NIGHT: 'night',
 };
 
 const PHASE_LENGTH_SECONDS = {
+  [PHASES.LOBBY]: 30,
   [PHASES.DAY]: 45,
   [PHASES.NIGHT]: 60,
 };

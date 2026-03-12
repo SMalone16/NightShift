@@ -120,8 +120,9 @@ class Game {
     this.projectiles = [];
     this.nextEnemyId = 1;
     this.nextProjectileId = 1;
-    this.phase = PHASES.DAY;
-    this.phaseTimer = PHASE_LENGTH_SECONDS[PHASES.DAY];
+    this.phase = PHASES.LOBBY;
+    this.phaseTimer = PHASE_LENGTH_SECONDS[PHASES.LOBBY];
+    this.lobbyTimer = PHASE_LENGTH_SECONDS[PHASES.LOBBY];
     this.roundStatus = 'running';
     this.nightNumber = 0;
     this.events = [];
@@ -188,9 +189,19 @@ class Game {
       safeZoneState: { entranceZoneId: null, activeZoneId: null },
     };
     this.players.set(clientId, player);
+    this.startLobbyOnFirstPlayer();
     touchUser(username, { xp: player.xp, level: player.level, character: player.character });
     this.logEvent(`${username} joined the shift.`);
     return player;
+  }
+
+  startLobbyOnFirstPlayer() {
+    if (this.players.size !== 1) return;
+    if (this.phase !== PHASES.LOBBY) return;
+
+    this.phaseTimer = PHASE_LENGTH_SECONDS[PHASES.LOBBY];
+    this.lobbyTimer = PHASE_LENGTH_SECONDS[PHASES.LOBBY];
+    this.logEvent('First ranger arrived. Lobby countdown started (30s).');
   }
 
   removePlayer(clientId) {
@@ -219,13 +230,26 @@ class Game {
   }
 
   tick(dt, now) {
+    if (this.phase === PHASES.LOBBY && this.players.size === 0) {
+      this.phaseTimer = PHASE_LENGTH_SECONDS[PHASES.LOBBY];
+      this.lobbyTimer = PHASE_LENGTH_SECONDS[PHASES.LOBBY];
+      return;
+    }
+
     this.phaseTimer -= dt;
+    if (this.phase === PHASES.LOBBY) {
+      this.lobbyTimer = Math.max(0, this.phaseTimer);
+    }
+
     if (this.phaseTimer <= 0) {
       this.advancePhase(now);
     }
 
     this.updatePlayers(dt, now);
-    this.updateProjectiles(dt, now);
+
+    if (this.phase !== PHASES.LOBBY) {
+      this.updateProjectiles(dt, now);
+    }
 
     if (this.phase === PHASES.NIGHT) {
       this.updateEnemies(dt, now);
@@ -235,6 +259,15 @@ class Game {
   }
 
   advancePhase(now) {
+    if (this.phase === PHASES.LOBBY) {
+      this.phase = PHASES.DAY;
+      this.phaseTimer = PHASE_LENGTH_SECONDS[PHASES.DAY];
+      this.lobbyTimer = 0;
+      this.prepareRoundStart(now);
+      this.logEvent('Lobby closed. Day shift has started.');
+      return;
+    }
+
     if (this.phase === PHASES.DAY) {
       this.phase = PHASES.NIGHT;
       this.phaseTimer = PHASE_LENGTH_SECONDS[PHASES.NIGHT];
@@ -244,31 +277,20 @@ class Game {
         p.objectiveReached = false;
       });
       this.logEvent(`Night ${this.nightNumber} has fallen. ${this.enemies.length} enemies are hunting. Get to objective together!`);
-    } else {
-      this.resetRound(false, now);
+      return;
     }
+
+    this.resetRound(false, now);
   }
 
-  resetRound(success, now) {
-    if (success) {
-      this.players.forEach((p) => {
-        const updated = addXp(p.username, 30);
-        p.xp = updated.xp;
-        p.level = updated.level;
-      });
-      this.logEvent('Round success! Team extracted and gained XP.');
-    } else {
-      this.logEvent('Round failed. Resetting camp...');
-    }
-
-    this.phase = PHASES.DAY;
-    this.phaseTimer = PHASE_LENGTH_SECONDS[PHASES.DAY];
+  prepareRoundStart(now) {
     this.enemies = [];
     this.projectiles = [];
     this.map = generateMap();
     this.mapStaticMetadata = this.buildMapStaticMetadata();
     this.sharedNightMap = this.buildSharedNightMap();
     this.maskedMapCache.clear();
+
     const spawns = this.map.spawns;
     let i = 0;
     this.players.forEach((p) => {
@@ -283,6 +305,24 @@ class Game {
       p.safeZoneState = { entranceZoneId: null, activeZoneId: null };
       i += 1;
     });
+  }
+
+  resetRound(success, now) {
+    if (success) {
+      this.players.forEach((p) => {
+        const updated = addXp(p.username, 30);
+        p.xp = updated.xp;
+        p.level = updated.level;
+      });
+      this.logEvent('Round success! Team extracted and gained XP.');
+    } else {
+      this.logEvent('Round failed. Resetting camp...');
+    }
+
+    this.phase = PHASES.LOBBY;
+    this.phaseTimer = PHASE_LENGTH_SECONDS[PHASES.LOBBY];
+    this.lobbyTimer = PHASE_LENGTH_SECONDS[PHASES.LOBBY];
+    this.prepareRoundStart(now);
   }
 
   spawnEnemies() {
@@ -353,31 +393,34 @@ class Game {
     this.players.forEach((p) => {
       this.updateFlashlightBattery(p, dt);
 
+      const canMove = this.phase !== PHASES.LOBBY;
       const slow = now < p.taggedUntil ? 0.45 : 1;
       const dx = (p.inputs.right ? 1 : 0) - (p.inputs.left ? 1 : 0);
       const dy = (p.inputs.down ? 1 : 0) - (p.inputs.up ? 1 : 0);
       const mag = Math.hypot(dx, dy) || 1;
       const step = (PLAYER_SPEED * slow * dt) / mag;
-      if (dx !== 0 || dy !== 0) {
+      if (canMove && (dx !== 0 || dy !== 0)) {
         p.facingX = dx / mag;
         p.facingY = dy / mag;
         this.tryMovePlayer(p, p.x + dx * step, p.y + dy * step);
       }
 
-      this.handleTileInteractions(p);
+      if (this.phase !== PHASES.LOBBY) {
+        this.handleTileInteractions(p);
+      }
 
-      if (p.wantsCraft) {
+      if (this.phase !== PHASES.LOBBY && p.wantsCraft) {
         this.autoCraft(p);
         p.wantsCraft = false;
       }
 
-      if (p.wantsWeaponSwap) {
+      if (this.phase !== PHASES.LOBBY && p.wantsWeaponSwap) {
         const nextWeapon = p.selectedWeapon === 'slingshot' ? 'bat' : 'slingshot';
         this.setSelectedWeapon(p, nextWeapon);
         p.wantsWeaponSwap = false;
       }
 
-      if (p.wantsAttack && now >= p.attackCooldownUntil) {
+      if (this.phase !== PHASES.LOBBY && p.wantsAttack && now >= p.attackCooldownUntil) {
         this.handleAttack(p, now);
         p.attackCooldownUntil = now + ATTACK_COOLDOWN;
       }
@@ -1003,7 +1046,7 @@ class Game {
   }
 
   getLightingMode() {
-    return this.phase === PHASES.DAY ? 'day' : 'night';
+    return this.phase === PHASES.NIGHT ? 'night' : 'day';
   }
 
   getVisionRadiusForPlayer(player) {
@@ -1137,6 +1180,7 @@ class Game {
       phase: this.phase,
       lightingMode,
       timer: Math.ceil(this.phaseTimer),
+      lobbyTimer: this.phase === PHASES.LOBBY ? Math.ceil(this.lobbyTimer) : null,
       events: this.events,
       recipes: RECIPES,
       materials: MATERIALS,
