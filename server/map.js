@@ -8,10 +8,10 @@ const ZONES = [
 ];
 
 const SAFE_ZONE_BLUEPRINTS = [
-  { id: 'safe-a', name: 'Safe Zone A', checkpointIndex: 0, maxHits: 5 },
-  { id: 'safe-b', name: 'Safe Zone B', checkpointIndex: 1, maxHits: 5 },
-  { id: 'safe-c', name: 'Safe Zone C', checkpointIndex: 2, maxHits: 6 },
-  { id: 'safe-d', name: 'Safe Zone D', checkpointIndex: 3, maxHits: 6 },
+  { id: 'safe-a', name: 'Safe Zone A', checkpointIndex: 0, width: 4, height: 4, maxHits: 5 },
+  { id: 'safe-b', name: 'Safe Zone B', checkpointIndex: 1, width: 4, height: 4, maxHits: 5 },
+  { id: 'safe-c', name: 'Safe Zone C', checkpointIndex: 2, width: 4, height: 4, maxHits: 6 },
+  { id: 'safe-d', name: 'Safe Zone D', checkpointIndex: 3, width: 4, height: 4, maxHits: 6 },
 ];
 
 function randomInt(min, max) {
@@ -54,30 +54,76 @@ function carvePath(grid, x1, y1, x2, y2) {
   grid[y][x] = TILE.PATH;
 }
 
-function getEntrancesForCheckpoint(grid, checkpoint) {
-  const candidates = [
-    { x: checkpoint.x, y: checkpoint.y - 1 },
-    { x: checkpoint.x + 1, y: checkpoint.y },
-    { x: checkpoint.x, y: checkpoint.y + 1 },
-    { x: checkpoint.x - 1, y: checkpoint.y },
-  ];
-
-  return candidates.filter((pos) => {
-    const tile = grid[pos.y]?.[pos.x];
-    return tile !== undefined && tile !== TILE.TREE && tile !== TILE.ROCK && tile !== TILE.STALL;
-  });
+function isSafeZoneFootprintBlocked(grid, tile) {
+  if (!tile) return true;
+  const value = grid[tile.y]?.[tile.x];
+  if (value === undefined) return true;
+  return [TILE.TREE, TILE.ROCK, TILE.STALL].includes(value);
 }
 
 function buildSafeZones(grid, checkpoints) {
+  const occupiedTiles = new Set();
+
   return SAFE_ZONE_BLUEPRINTS.map((zoneDef) => {
     const checkpoint = checkpoints[zoneDef.checkpointIndex];
-    const entrances = getEntrancesForCheckpoint(grid, checkpoint);
+    const width = zoneDef.width;
+    const height = zoneDef.height;
+
+    const candidateOrigins = [];
+    const searchRadius = Math.max(width, height) * 3;
+    for (let y = checkpoint.y - searchRadius; y <= checkpoint.y + searchRadius; y += 1) {
+      for (let x = checkpoint.x - searchRadius; x <= checkpoint.x + searchRadius; x += 1) {
+        candidateOrigins.push({ x, y });
+      }
+    }
+
+    candidateOrigins.sort((a, b) => {
+      const aDist = Math.abs(a.x - checkpoint.x) + Math.abs(a.y - checkpoint.y);
+      const bDist = Math.abs(b.x - checkpoint.x) + Math.abs(b.y - checkpoint.y);
+      return aDist - bDist;
+    });
+
+    let placement = null;
+
+    candidateOrigins.some((origin) => {
+      const tiles = [];
+      for (let y = origin.y; y < origin.y + height; y += 1) {
+        for (let x = origin.x; x < origin.x + width; x += 1) {
+          tiles.push({ x, y });
+        }
+      }
+
+      const entrances = [];
+      const entranceY = origin.y + height;
+      for (let x = origin.x; x < origin.x + width; x += 1) {
+        entrances.push({ x, y: entranceY });
+      }
+
+      const footprint = [...tiles, ...entrances];
+      const isValidFootprint = footprint.every((tile) => !isSafeZoneFootprintBlocked(grid, tile) && !occupiedTiles.has(`${tile.x},${tile.y}`));
+
+      if (!isValidFootprint) return false;
+
+      placement = { origin, tiles, entrances };
+      return true;
+    });
+
+    if (!placement) {
+      throw new Error(`Unable to place safe zone ${zoneDef.id}: blocked or out-of-bounds footprint`);
+    }
+
+    [...placement.tiles, ...placement.entrances].forEach((tile) => {
+      occupiedTiles.add(`${tile.x},${tile.y}`);
+    });
 
     return {
       id: zoneDef.id,
       name: zoneDef.name,
-      tiles: [{ x: checkpoint.x, y: checkpoint.y }],
-      entrances,
+      origin: placement.origin,
+      width,
+      height,
+      tiles: placement.tiles,
+      entrances: placement.entrances,
       maxHits: zoneDef.maxHits,
       remainingHits: zoneDef.maxHits,
       destroyed: false,
@@ -126,10 +172,21 @@ function generateMap() {
     grid[cp.y][cp.x] = TILE.CHECKPOINT;
   });
 
+  const safeZones = buildSafeZones(grid, checkpoints);
+  const reservedSafeZoneTiles = new Set(
+    safeZones.flatMap((zone) => [...zone.tiles, ...zone.entrances].map((tile) => `${tile.x},${tile.y}`)),
+  );
+  const canPlaceOnUnreservedTile = (x, y) => !reservedSafeZoneTiles.has(`${x},${y}`);
+
   const interiorTiles = (MAP_WIDTH - 2) * (MAP_HEIGHT - 2);
-  placeRandomTiles(grid, TILE.TREE, Math.floor(interiorTiles * 0.095), (x, y) => Math.abs(x - objective.x) + Math.abs(y - objective.y) > 7);
-  placeRandomTiles(grid, TILE.ROCK, Math.floor(interiorTiles * 0.06));
-  placeRandomTiles(grid, TILE.CHEST, Math.floor(interiorTiles * 0.022));
+  placeRandomTiles(
+    grid,
+    TILE.TREE,
+    Math.floor(interiorTiles * 0.095),
+    (x, y) => Math.abs(x - objective.x) + Math.abs(y - objective.y) > 7 && canPlaceOnUnreservedTile(x, y),
+  );
+  placeRandomTiles(grid, TILE.ROCK, Math.floor(interiorTiles * 0.06), canPlaceOnUnreservedTile);
+  placeRandomTiles(grid, TILE.CHEST, Math.floor(interiorTiles * 0.022), canPlaceOnUnreservedTile);
 
   const spawns = [
     { x: 3, y: 3 },
@@ -139,8 +196,6 @@ function generateMap() {
     { x: 10, y: 6 },
     { x: 12, y: MAP_HEIGHT - 7 },
   ];
-
-  const safeZones = buildSafeZones(grid, checkpoints);
 
   return {
     width: MAP_WIDTH,
