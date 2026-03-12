@@ -115,6 +115,9 @@ let snapshot = null;
 let sharedSnapshot = null;
 const playerAnimTimers = new Map();
 let selectedCharacter = 'ranger';
+let localLevelUpFxUntil = 0;
+let localLevelUpLevel = 1;
+let lastServerLevelUpFxUntil = 0;
 
 const PLAYER_FRAME_MS = {
   idle: 280,
@@ -725,6 +728,49 @@ function drawLobbyOverlay(timerSeconds) {
   ctx.restore();
 }
 
+function syncLocalLevelUpFx(me) {
+  const nowSeconds = Date.now() / 1000;
+  const serverFxUntil = Number(me?.levelUpFxUntil) || 0;
+  if (serverFxUntil > lastServerLevelUpFxUntil && serverFxUntil > nowSeconds) {
+    localLevelUpFxUntil = performance.now() / 1000 + 1;
+    localLevelUpLevel = Number(me?.level) || localLevelUpLevel;
+  }
+  lastServerLevelUpFxUntil = serverFxUntil;
+}
+
+function drawLocalLevelUpEffect(me, camera) {
+  const now = performance.now() / 1000;
+  if (now >= localLevelUpFxUntil) return;
+
+  const duration = 1;
+  const progress = clamp(1 - ((localLevelUpFxUntil - now) / duration), 0, 1);
+  const fade = 1 - progress;
+  const center = worldToScreen(me.x, me.y, camera);
+
+  const ringRadius = 18 + progress * 44;
+  ctx.save();
+  ctx.strokeStyle = `rgba(255, 227, 128, ${0.95 * fade})`;
+  ctx.lineWidth = 2 + (1 - progress) * 4;
+  ctx.beginPath();
+  ctx.arc(center.x, center.y, ringRadius, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.fillStyle = `rgba(255, 236, 168, ${fade})`;
+  ctx.font = 'bold 18px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(`LEVEL ${localLevelUpLevel}!`, center.x, center.y - 34 - (progress * 14));
+  ctx.textAlign = 'start';
+  ctx.restore();
+
+  const flashAlpha = 0.26 * fade;
+  if (flashAlpha > 0) {
+    ctx.save();
+    ctx.fillStyle = `rgba(255, 244, 182, ${flashAlpha})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
+  }
+}
+
 function drawLoadingState() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = '#10151d';
@@ -744,6 +790,8 @@ function render() {
   const map = snapshot.map;
   const me = snapshot.players.find((p) => p.id === selfId);
   if (!me) return;
+
+  syncLocalLevelUpFx(me);
 
   const lightingMode = getLightingMode();
   const tileColors = lightingMode === 'night' ? NIGHT_COLORS : DAY_COLORS;
@@ -866,6 +914,8 @@ function render() {
     ctx.font = '12px sans-serif';
     ctx.fillText(player.username, screen.x - 20, screen.y - 12);
   });
+
+  drawLocalLevelUpEffect(me, camera);
 
   if (lightingMode === 'night' && snapshot.visionRadius) {
     ctx.save();

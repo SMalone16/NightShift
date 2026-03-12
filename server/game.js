@@ -241,6 +241,7 @@ class Game {
         zombieDefeat: 0,
         total: 0,
       },
+      levelUpFxUntil: 0,
       lastSurvivalXpAt: 0,
       safeZoneState: { entranceZoneId: null, activeZoneId: null },
     };
@@ -1327,11 +1328,15 @@ class Game {
 
   rewardXp(player, amount, { category = null } = {}) {
     const updated = addXp(player.username, amount);
-    const previousLevel = player.level;
+    const oldLevel = player.level;
+    const now = Date.now() / 1000;
     player.xp = updated.xp;
     player.level = updated.level;
-    if (previousLevel !== player.level) {
+    const newLevel = player.level;
+    if (oldLevel !== newLevel) {
+      player.levelUpFxUntil = now + 1.0;
       this.recomputePlayerStats(player);
+      this.logEvent(`${player.username} leveled up to ${newLevel}!`);
     }
 
     if (!category) return;
@@ -1467,6 +1472,7 @@ class Game {
           xp: p.xp,
           level: p.level,
           xpEarned: p.xpEarned,
+          levelUpFxUntil: (!player || p.id === player.id) ? p.levelUpFxUntil : 0,
         })),
       enemies: this.enemies
         .filter((e) => !player || !isNight || this.isWithinVision(player, e, visionRadius))
