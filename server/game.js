@@ -35,6 +35,10 @@ const ENEMY_CONTACT_DAMAGE = 20;
 const ENEMY_CONTACT_DAMAGE_COOLDOWN = 1.1;
 const PLAYER_RESPAWN_INVULNERABILITY = 2.5;
 const ENEMY_HEALTH_BASE = 3;
+const SURVIVAL_XP_INTERVAL_SECONDS = 20;
+const SURVIVAL_XP_REWARD = 2;
+const ZOMBIE_BOP_XP_REWARD = 1;
+const ZOMBIE_DEFEAT_XP_BONUS = 6;
 
 const BAT_DURABILITY_BY_TIER = {
   0: 0,
@@ -186,6 +190,13 @@ class Game {
       objectiveReached: false,
       xp: profile.xp,
       level: profile.level,
+      xpEarned: {
+        survival: 0,
+        zombieHit: 0,
+        zombieDefeat: 0,
+        total: 0,
+      },
+      lastSurvivalXpAt: 0,
       safeZoneState: { entranceZoneId: null, activeZoneId: null },
     };
     this.players.set(clientId, player);
@@ -252,10 +263,29 @@ class Game {
     }
 
     if (this.phase === PHASES.NIGHT) {
+      this.grantNightSurvivalXp(now);
       this.updateEnemies(dt, now);
       this.checkObjectiveWin();
       this.checkChaseTimeout();
     }
+  }
+
+  grantNightSurvivalXp(now) {
+    this.players.forEach((player) => {
+      if (!player.lastSurvivalXpAt) {
+        player.lastSurvivalXpAt = now;
+        return;
+      }
+
+      const elapsed = now - player.lastSurvivalXpAt;
+      if (elapsed < SURVIVAL_XP_INTERVAL_SECONDS) return;
+
+      const rewardsToGrant = Math.floor(elapsed / SURVIVAL_XP_INTERVAL_SECONDS);
+      const xpAmount = rewardsToGrant * SURVIVAL_XP_REWARD;
+      player.lastSurvivalXpAt += rewardsToGrant * SURVIVAL_XP_INTERVAL_SECONDS;
+      this.rewardXp(player, xpAmount, { category: 'survival' });
+      this.logEvent(`${player.username} endured the night (+${xpAmount} XP).`);
+    });
   }
 
   advancePhase(now) {
@@ -275,6 +305,7 @@ class Game {
       this.spawnEnemies();
       this.players.forEach((p) => {
         p.objectiveReached = false;
+        p.lastSurvivalXpAt = now;
       });
       this.logEvent(`Night ${this.nightNumber} has fallen. ${this.enemies.length} enemies are hunting. Get to objective together!`);
       return;
@@ -652,6 +683,7 @@ class Game {
             damage: 1,
             stunDuration: 0.5 + 0.2 * player.gear.bat,
             sourceToken: `${swingToken}:${e.id}`,
+            attackerId: player.id,
             attackerName: player.username,
             sourceType: 'bat',
           });
@@ -692,6 +724,7 @@ class Game {
             damage: 1,
             stunDuration: proj.stun,
             sourceToken: `projectile:${proj.id}:${e.id}`,
+            attackerId: proj.ownerId,
             attackerName: ownerName,
             sourceType: 'projectile',
           });
@@ -710,7 +743,15 @@ class Game {
     this.projectiles = this.projectiles.filter((p) => p.ttl > 0 && this.isTileWalkable(Math.round(p.x), Math.round(p.y)));
   }
 
-  applyDamageToEnemy(enemy, { now, damage, stunDuration = 0, sourceToken, attackerName = 'Unknown', sourceType = 'attack' }) {
+  applyDamageToEnemy(enemy, {
+    now,
+    damage,
+    stunDuration = 0,
+    sourceToken,
+    attackerId = null,
+    attackerName = 'Unknown',
+    sourceType = 'attack',
+  }) {
     if (!enemy || enemy.hp <= 0) return false;
     if (sourceToken && enemy.lastDamageSourceToken === sourceToken) {
       return false;
@@ -724,13 +765,44 @@ class Game {
       enemy.stunnedUntil = Math.max(enemy.stunnedUntil, now + stunDuration);
     }
 
+    if (!enemy.damageByPlayerId) {
+      enemy.damageByPlayerId = {};
+    }
+
+    if (attackerId && this.players.has(attackerId)) {
+      enemy.damageByPlayerId[attackerId] = (enemy.damageByPlayerId[attackerId] || 0) + damage;
+      const attacker = this.players.get(attackerId);
+      this.rewardXp(attacker, ZOMBIE_BOP_XP_REWARD, { category: 'zombieHit' });
+      this.logEvent(`${attacker.username} bopped enemy ${enemy.id} (+${ZOMBIE_BOP_XP_REWARD} XP).`);
+    }
+
     enemy.hp = Math.max(0, (enemy.hp || 0) - damage);
     if (enemy.hp > 0) {
       return false;
     }
 
+    this.distributeEnemyDefeatXp(enemy);
     this.logEvent(`Enemy ${enemy.id} defeated by ${attackerName} (${sourceType}).`);
     return true;
+  }
+
+  distributeEnemyDefeatXp(enemy) {
+    const contributorIds = Object.keys(enemy.damageByPlayerId || {}).filter((playerId) => this.players.has(playerId));
+    if (contributorIds.length === 0) return;
+
+    contributorIds.sort();
+    const splitBase = Math.floor(ZOMBIE_DEFEAT_XP_BONUS / contributorIds.length);
+    let remainder = ZOMBIE_DEFEAT_XP_BONUS % contributorIds.length;
+
+    contributorIds.forEach((playerId) => {
+      const bonus = splitBase + (remainder > 0 ? 1 : 0);
+      if (remainder > 0) remainder -= 1;
+      if (bonus <= 0) return;
+
+      const player = this.players.get(playerId);
+      this.rewardXp(player, bonus, { category: 'zombieDefeat' });
+      this.logEvent(`${player.username} claimed enemy defeat bonus (+${bonus} XP).`);
+    });
   }
 
   updateEnemies(dt, now) {
@@ -1034,10 +1106,23 @@ class Game {
     }
   }
 
-  rewardXp(player, amount) {
+  rewardXp(player, amount, { category = null } = {}) {
     const updated = addXp(player.username, amount);
     player.xp = updated.xp;
     player.level = updated.level;
+
+    if (!category) return;
+
+    if (!player.xpEarned) {
+      player.xpEarned = { survival: 0, zombieHit: 0, zombieDefeat: 0, total: 0 };
+    }
+
+    if (player.xpEarned[category] === undefined) {
+      player.xpEarned[category] = 0;
+    }
+
+    player.xpEarned[category] += amount;
+    player.xpEarned.total += amount;
   }
 
   logEvent(message) {
@@ -1157,6 +1242,7 @@ class Game {
           objectiveReached: p.objectiveReached,
           xp: p.xp,
           level: p.level,
+          xpEarned: p.xpEarned,
         })),
       enemies: this.enemies
         .filter((e) => !player || !isNight || this.isWithinVision(player, e, visionRadius))
