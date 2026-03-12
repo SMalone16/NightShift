@@ -167,8 +167,18 @@ class Game {
     return {
       ...this.mapStaticMetadata,
       tiles,
-      safeZones: this.map.safeZones || [],
+      safeZones: this.getSafeZoneSnapshot(),
     };
+  }
+
+  getSafeZoneSnapshot() {
+    return (this.map.safeZones || []).map((zone) => ({
+      ...zone,
+      remainingHits: Math.max(0, Number(zone.remainingHits) || 0),
+      maxHits: Math.max(0, Number(zone.maxHits) || 0),
+      armorCurrent: Math.max(0, Number(zone.armorCurrent) || 0),
+      armorMax: Math.max(0, Number(zone.armorMax) || 0),
+    }));
   }
 
   addPlayer(clientId, username, selectedCharacter) {
@@ -1362,7 +1372,7 @@ class Game {
     const maskedMap = {
       ...this.mapStaticMetadata,
       tiles,
-      safeZones: this.map.safeZones || [],
+      safeZones: this.getSafeZoneSnapshot(),
     };
 
     this.maskedMapCache.set(player.id, { key: cacheKey, map: maskedMap });
@@ -1424,7 +1434,7 @@ class Game {
       recipes: RECIPES,
       materials: MATERIALS,
       visibility: SPECIAL_TILE_VISIBILITY,
-      map: isNight ? this.sharedNightMap : this.map,
+      map: isNight ? { ...this.sharedNightMap, safeZones: this.getSafeZoneSnapshot() } : { ...this.map, safeZones: this.getSafeZoneSnapshot() },
       visionRadius: null,
     };
 
@@ -1449,7 +1459,9 @@ class Game {
     const visionRadius = player ? this.getVisionRadiusForPlayer(player) : 0;
 
     return {
-      map: player && isNight ? this.getMaskedMapForPlayer(player, visionRadius) : this.map,
+      map: player && isNight
+        ? this.getMaskedMapForPlayer(player, visionRadius)
+        : { ...this.map, safeZones: this.getSafeZoneSnapshot() },
       ...this.getVisibleEntitiesForPlayer(player, isNight, visionRadius),
       visionRadius: isNight ? visionRadius : null,
     };
