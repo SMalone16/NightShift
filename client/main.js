@@ -394,26 +394,121 @@ function getAnimationFramesForState(animState, character = 'ranger') {
   return [];
 }
 
-function drawSafeZones(map, camera) {
+function drawSafeZones(map, camera, lightingMode) {
   if (!Array.isArray(map.safeZones)) return;
 
+  const palette = lightingMode === 'night'
+    ? {
+      tileFill: 'rgba(122, 84, 198, 0.28)',
+      tileDestroyedFill: 'rgba(136, 44, 68, 0.42)',
+      tileFortifiedFill: 'rgba(66, 121, 201, 0.38)',
+      text: '#efe6ff',
+      destroyedText: '#ffd2d2',
+      fortifiedText: '#b9ebff',
+      barBg: 'rgba(8, 10, 17, 0.92)',
+      health: '#9f7dff',
+      armor: '#74d6ff',
+      destroyedBar: '#ce5e7e',
+      fortifiedBar: '#5eacff',
+      border: 'rgba(236, 223, 255, 0.6)',
+    }
+    : {
+      tileFill: 'rgba(173, 130, 255, 0.24)',
+      tileDestroyedFill: 'rgba(185, 72, 84, 0.36)',
+      tileFortifiedFill: 'rgba(99, 176, 245, 0.3)',
+      text: '#2f1c52',
+      destroyedText: '#5e1e27',
+      fortifiedText: '#123d73',
+      barBg: 'rgba(20, 26, 38, 0.86)',
+      health: '#7c53f3',
+      armor: '#38add6',
+      destroyedBar: '#bc4459',
+      fortifiedBar: '#3988d8',
+      border: 'rgba(238, 227, 255, 0.8)',
+    };
+
   map.safeZones.forEach((zone) => {
+    if (!Array.isArray(zone.tiles) || !zone.tiles.length) return;
+
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+
     zone.tiles.forEach((tile) => {
+      minX = Math.min(minX, tile.x);
+      maxX = Math.max(maxX, tile.x);
+      minY = Math.min(minY, tile.y);
+      maxY = Math.max(maxY, tile.y);
+
       const screen = worldToScreen(tile.x, tile.y, camera);
       if (!isOnScreen(screen.x, screen.y, TILE_SIZE)) return;
 
       ctx.save();
-      ctx.fillStyle = zone.destroyed ? 'rgba(120, 30, 30, 0.45)' : 'rgba(90, 170, 220, 0.35)';
+      if (zone.destroyed) {
+        ctx.fillStyle = palette.tileDestroyedFill;
+      } else if (zone.fortified) {
+        ctx.fillStyle = palette.tileFortifiedFill;
+      } else {
+        ctx.fillStyle = palette.tileFill;
+      }
       ctx.fillRect(screen.x, screen.y, TILE_SIZE, TILE_SIZE);
-      ctx.fillStyle = zone.destroyed ? '#ffd0d0' : '#e8f8ff';
+      ctx.fillStyle = zone.destroyed ? palette.destroyedText : palette.text;
       ctx.font = '10px sans-serif';
       ctx.fillText('SAFE ZONE', screen.x + 2, screen.y + 11);
       if (zone.destroyed) {
-        ctx.fillStyle = '#ffd1a8';
+        ctx.fillStyle = palette.destroyedText;
         ctx.fillText('DESTROYED', screen.x + 2, screen.y + 22);
+      } else if (zone.fortified) {
+        ctx.fillStyle = palette.fortifiedText;
+        ctx.fillText('FORTIFIED', screen.x + 2, screen.y + 22);
       }
       ctx.restore();
     });
+
+    if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minY) || !Number.isFinite(maxY)) return;
+
+    const centerTileX = (minX + maxX + 1) / 2;
+    const centerTileY = (minY + maxY + 1) / 2;
+    const centerScreen = worldToScreen(centerTileX, centerTileY, camera);
+    const zonePixelWidth = Math.max(TILE_SIZE * 2.2, (maxX - minX + 1) * TILE_SIZE * 0.9);
+    const baseBarHeight = Math.max(6, Math.round(TILE_SIZE * 0.24));
+    const armorBarHeight = Math.max(5, Math.round(TILE_SIZE * 0.2));
+    const healthBarY = centerScreen.y - TILE_SIZE * 1.45;
+    const armorValue = Number(zone.armor ?? zone.currentArmor ?? zone.fortificationArmor ?? 0);
+    const armorMax = Number(zone.maxArmor ?? zone.armorMax ?? zone.fortificationArmorMax ?? 0);
+    const hasArmorBar = armorMax > 0 || armorValue > 0;
+    const totalStackHeight = hasArmorBar ? (baseBarHeight + armorBarHeight + 4) : baseBarHeight;
+    if (!isOnScreen(centerScreen.x - zonePixelWidth / 2, healthBarY, zonePixelWidth, totalStackHeight + 2)) return;
+
+    const maxHits = Math.max(0, Number(zone.maxHits) || 0);
+    const remainingHits = clamp(Number(zone.remainingHits) || 0, 0, maxHits || 1);
+    const healthRatio = maxHits > 0 ? remainingHits / maxHits : 0;
+
+    ctx.save();
+    ctx.fillStyle = palette.barBg;
+    ctx.fillRect(centerScreen.x - zonePixelWidth / 2, healthBarY, zonePixelWidth, baseBarHeight);
+    ctx.fillStyle = zone.destroyed
+      ? palette.destroyedBar
+      : (zone.fortified ? palette.fortifiedBar : palette.health);
+    ctx.fillRect(centerScreen.x - zonePixelWidth / 2, healthBarY, zonePixelWidth * healthRatio, baseBarHeight);
+    ctx.strokeStyle = palette.border;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(centerScreen.x - zonePixelWidth / 2, healthBarY, zonePixelWidth, baseBarHeight);
+
+    if (hasArmorBar) {
+      const safeArmorMax = Math.max(0, armorMax);
+      const safeArmor = clamp(armorValue, 0, safeArmorMax || 1);
+      const armorRatio = safeArmorMax > 0 ? safeArmor / safeArmorMax : 0;
+      const armorY = healthBarY + baseBarHeight + 4;
+      ctx.fillStyle = palette.barBg;
+      ctx.fillRect(centerScreen.x - zonePixelWidth / 2, armorY, zonePixelWidth, armorBarHeight);
+      ctx.fillStyle = zone.destroyed ? '#8c6f7a' : palette.armor;
+      ctx.fillRect(centerScreen.x - zonePixelWidth / 2, armorY, zonePixelWidth * armorRatio, armorBarHeight);
+      ctx.strokeStyle = palette.border;
+      ctx.strokeRect(centerScreen.x - zonePixelWidth / 2, armorY, zonePixelWidth, armorBarHeight);
+    }
+    ctx.restore();
   });
 }
 
@@ -687,7 +782,7 @@ function render() {
     }
   }
 
-  drawSafeZones(map, camera);
+  drawSafeZones(map, camera, lightingMode);
 
   snapshot.projectiles.forEach((proj) => {
     const screen = worldToScreen(proj.x, proj.y, camera);
