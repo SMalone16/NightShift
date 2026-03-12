@@ -33,7 +33,12 @@ const PLAYER_BUCKET_SIZE = 4;
 const ENEMY_PATH_RECALC_INTERVAL = 0.5;
 const ENEMY_PATH_GOAL_EPSILON = 0.15;
 const ENEMY_PATH_REACH_EPSILON = 0.08;
-const FLASHLIGHT_DRAIN_PER_SECOND = 1;
+const FLASHLIGHT_DRAIN_BY_TORCH_TIER = {
+  0: 0,
+  1: 3.0,
+  2: 2.4,
+  3: 1.8,
+};
 const PLAYER_HEALTH_MAX = 100;
 const ENEMY_CONTACT_DAMAGE = 20;
 const ENEMY_CONTACT_DAMAGE_COOLDOWN = 1.1;
@@ -716,7 +721,8 @@ class Game {
       return;
     }
 
-    battery.current = clamp(battery.current - (FLASHLIGHT_DRAIN_PER_SECOND * dt), 0, maxBattery);
+    const drainPerSecond = FLASHLIGHT_DRAIN_BY_TORCH_TIER[player.gear.torch] || FLASHLIGHT_DRAIN_BY_TORCH_TIER[1];
+    battery.current = clamp(battery.current - (drainPerSecond * dt), 0, maxBattery);
   }
 
   isFlashlightActive(player) {
@@ -1366,8 +1372,15 @@ class Game {
     if (this.getLightingMode() === 'day') {
       return Infinity;
     }
-    const flashlightTier = this.isFlashlightActive(player) ? player.gear.torch : 0;
-    return VISION_RADIUS_BASE_TILES + flashlightTier * VISION_RADIUS_PER_TORCH_TIER;
+
+    const flashlightTier = Math.max(0, Number(player.gear.torch) || 0);
+    const tierCapRange = VISION_RADIUS_BASE_TILES + flashlightTier * VISION_RADIUS_PER_TORCH_TIER;
+    const battery = player.combat.flashlightBattery || { current: 0, max: 0 };
+    const batteryRatio = battery.max > 0 ? clamp(battery.current / battery.max, 0, 1) : 0;
+    const easedBatteryRatio = Math.pow(batteryRatio, 0.75);
+    const scalableRange = Math.max(0, tierCapRange - VISION_RADIUS_BASE_TILES);
+
+    return VISION_RADIUS_BASE_TILES + (scalableRange * easedBatteryRatio);
   }
 
   isWithinVision(player, entity, radius) {

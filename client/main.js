@@ -980,8 +980,12 @@ function renderHud() {
     const batDurability = me.combat?.batDurability || { current: 0, max: 0 };
     const flashlightBattery = me.combat?.flashlightBattery || { current: 0, max: 0 };
     const flashlightStatus = me.flashlightActive ? 'Active' : (lightingMode === 'night' ? 'Empty battery' : 'Charging (day)');
+    const batteryRatio = flashlightBattery.max > 0
+      ? Math.max(0, Math.min(1, flashlightBattery.current / flashlightBattery.max))
+      : 0;
+    const beamStrengthPercent = Math.round(batteryRatio * 100);
 
-    gearInfo.innerHTML = `<strong>Gear</strong><br>Torch T${me.gear.torch} | Bat T${me.gear.bat} | Slingshot T${me.gear.slingshot}<br><strong>Selected:</strong> ${selectedWeaponLabel} (Q to swap)<br><strong>Pebbles:</strong> ${me.inventory.pebbles}<br><strong>Bat durability:</strong> ${Math.ceil(batDurability.current)}/${batDurability.max}<br><strong>Flashlight:</strong> ${Math.ceil(flashlightBattery.current)}/${flashlightBattery.max} (${flashlightStatus})`;
+    gearInfo.innerHTML = `<strong>Gear</strong><br>Torch T${me.gear.torch} | Bat T${me.gear.bat} | Slingshot T${me.gear.slingshot}<br><strong>Selected:</strong> ${selectedWeaponLabel} (Q to swap)<br><strong>Pebbles:</strong> ${me.inventory.pebbles}<br><strong>Bat durability:</strong> ${Math.ceil(batDurability.current)}/${batDurability.max}<br><strong>Flashlight:</strong> ${Math.ceil(flashlightBattery.current)}/${flashlightBattery.max} (${flashlightStatus})<br><strong>Night beam:</strong> scales with battery (${beamStrengthPercent}% strength)`;
 
     const everyone = snapshot.players
       .map((p) => `${p.objectiveReached ? '✅' : '⬜'} ${p.username}`)
