@@ -649,15 +649,13 @@ function render() {
 
   const lightingMode = getLightingMode();
   const tileColors = lightingMode === 'night' ? NIGHT_COLORS : DAY_COLORS;
+  const grassUnderlayColor = tileColors[TILE.GRASS] || DAY_COLORS[TILE.GRASS];
   const camera = getCamera(map, me);
   const now = performance.now();
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  if (lightingMode === 'day') {
-    ctx.fillStyle = DAY_COLORS[TILE.GRASS];
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-  }
+  ctx.fillStyle = grassUnderlayColor;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   const minTileX = Math.max(0, Math.floor(camera.x / TILE_SIZE));
   const maxTileX = Math.min(map.width - 1, Math.ceil((camera.x + canvas.width) / TILE_SIZE));
@@ -674,6 +672,8 @@ function render() {
       const shouldUseBlackout = lightingMode === 'night' && tile === HIDDEN_TILE;
 
       if (tileSprite && !shouldUseBlackout) {
+        ctx.fillStyle = grassUnderlayColor;
+        ctx.fillRect(screen.x, screen.y, TILE_SIZE, TILE_SIZE);
         ctx.drawImage(tileSprite, screen.x, screen.y, TILE_SIZE, TILE_SIZE);
       } else {
         ctx.fillStyle = tileColors[tile] || '#000';
