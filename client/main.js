@@ -265,6 +265,10 @@ function getLightingMode() {
   return snapshot?.lightingMode === 'night' ? 'night' : 'day';
 }
 
+function isLobbyPhase() {
+  return snapshot?.phase === 'lobby';
+}
+
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -594,6 +598,35 @@ function drawGameplayHud(me, lightingMode) {
   ctx.restore();
 }
 
+
+function drawLobbyOverlay(timerSeconds) {
+  const displayTimer = Math.max(0, Math.ceil(Number(timerSeconds) || 0));
+  const boxWidth = 420;
+  const boxHeight = 128;
+  const x = (canvas.width - boxWidth) / 2;
+  const y = 22;
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(6, 10, 18, 0.78)';
+  ctx.strokeStyle = 'rgba(176, 203, 250, 0.75)';
+  ctx.lineWidth = 2;
+  ctx.fillRect(x, y, boxWidth, boxHeight);
+  ctx.strokeRect(x, y, boxWidth, boxHeight);
+
+  ctx.fillStyle = '#e8edf5';
+  ctx.textAlign = 'center';
+  ctx.font = '20px sans-serif';
+  ctx.fillText('LOBBY: MATCH STARTING SOON', canvas.width / 2, y + 36);
+  ctx.font = '48px sans-serif';
+  ctx.fillStyle = '#90d1ff';
+  ctx.fillText(`${displayTimer}s`, canvas.width / 2, y + 90);
+  ctx.font = '14px sans-serif';
+  ctx.fillStyle = '#b8c7dd';
+  ctx.fillText('Combat is paused while players connect and assets load.', canvas.width / 2, y + 112);
+  ctx.textAlign = 'start';
+  ctx.restore();
+}
+
 function drawLoadingState() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = '#10151d';
@@ -762,8 +795,12 @@ function render() {
     ctx.restore();
   }
 
-  drawGameplayHud(me, lightingMode);
-  drawZoneOverlay(map, me, camera);
+  if (isLobbyPhase()) {
+    drawLobbyOverlay(snapshot.lobbyTimer ?? snapshot.timer);
+  } else {
+    drawGameplayHud(me, lightingMode);
+    drawZoneOverlay(map, me, camera);
+  }
 }
 
 function renderHud() {
@@ -772,30 +809,40 @@ function renderHud() {
   if (!me) return;
 
   const lightingMode = getLightingMode();
-  const phaseLabel = lightingMode === 'day' ? 'DAY' : 'NIGHT';
-  phaseInfo.innerHTML = `<strong>Cycle:</strong> ${phaseLabel} | <strong>Time:</strong> ${snapshot.timer}s`;
+  const lobbyActive = isLobbyPhase();
+  const phaseLabel = lobbyActive ? 'LOBBY' : (lightingMode === 'day' ? 'DAY' : 'NIGHT');
+  const activeTimer = lobbyActive ? (snapshot.lobbyTimer ?? snapshot.timer ?? 0) : (snapshot.timer ?? 0);
+  phaseInfo.innerHTML = `<strong>Cycle:</strong> ${phaseLabel} | <strong>Time:</strong> ${Math.max(0, activeTimer)}s`;
   const health = me.health || { current: 0, max: 0 };
-  playerInfo.innerHTML = `<strong>${me.username}</strong> (${(me.character || 'ranger').toUpperCase()}) — XP ${me.xp}, Level ${me.level}, HP ${Math.ceil(health.current)}/${health.max}`;
-  const resources = Array.isArray(snapshot.materials) ? snapshot.materials : Object.keys(me.inventory || {});
-  inventoryInfo.innerHTML = [
-    '<strong>Resources</strong>',
-    ...resources.map((material) => `${formatResourceLabel(material)}: ${me.inventory?.[material] ?? 0}`),
-  ].join('<br>');
 
-  const selectedWeaponLabel = me.selectedWeapon === 'slingshot' ? 'Slingshot' : 'Bat';
-  const batDurability = me.combat?.batDurability || { current: 0, max: 0 };
-  const flashlightBattery = me.combat?.flashlightBattery || { current: 0, max: 0 };
-  const flashlightStatus = me.flashlightActive ? 'Active' : (lightingMode === 'night' ? 'Empty battery' : 'Charging (day)');
+  if (lobbyActive) {
+    playerInfo.innerHTML = `<strong>${me.username}</strong> (${(me.character || 'ranger').toUpperCase()}) — XP ${me.xp}, Level ${me.level}<br><strong>Lobby countdown:</strong> ${Math.max(0, activeTimer)}s`;
+    inventoryInfo.innerHTML = '<strong>Lobby staging</strong><br>Combat and crafting are disabled while players connect and assets finish loading.';
+    gearInfo.innerHTML = '<strong>Get ready</strong><br>Use this time to confirm controls and wait for teammates.';
+    teamInfo.innerHTML = `<strong>Connected players</strong><br>${snapshot.players.map((p) => `• ${p.username}`).join('<br>')}`;
+  } else {
+    playerInfo.innerHTML = `<strong>${me.username}</strong> (${(me.character || 'ranger').toUpperCase()}) — XP ${me.xp}, Level ${me.level}, HP ${Math.ceil(health.current)}/${health.max}`;
+    const resources = Array.isArray(snapshot.materials) ? snapshot.materials : Object.keys(me.inventory || {});
+    inventoryInfo.innerHTML = [
+      '<strong>Resources</strong>',
+      ...resources.map((material) => `${formatResourceLabel(material)}: ${me.inventory?.[material] ?? 0}`),
+    ].join('<br>');
 
-  gearInfo.innerHTML = `<strong>Gear</strong><br>Torch T${me.gear.torch} | Bat T${me.gear.bat} | Slingshot T${me.gear.slingshot}<br><strong>Selected:</strong> ${selectedWeaponLabel} (Q to swap)<br><strong>Pebbles:</strong> ${me.inventory.pebbles}<br><strong>Bat durability:</strong> ${Math.ceil(batDurability.current)}/${batDurability.max}<br><strong>Flashlight:</strong> ${Math.ceil(flashlightBattery.current)}/${flashlightBattery.max} (${flashlightStatus})`;
+    const selectedWeaponLabel = me.selectedWeapon === 'slingshot' ? 'Slingshot' : 'Bat';
+    const batDurability = me.combat?.batDurability || { current: 0, max: 0 };
+    const flashlightBattery = me.combat?.flashlightBattery || { current: 0, max: 0 };
+    const flashlightStatus = me.flashlightActive ? 'Active' : (lightingMode === 'night' ? 'Empty battery' : 'Charging (day)');
 
-  const everyone = snapshot.players
-    .map((p) => `${p.objectiveReached ? '✅' : '⬜'} ${p.username}`)
-    .join('<br>');
-  const safeZoneStatus = (snapshot.map.safeZones || [])
-    .map((zone) => `${zone.name}: ${zone.remainingHits}/${zone.maxHits}${zone.destroyed ? ' (destroyed)' : ''}`)
-    .join('<br>');
-  teamInfo.innerHTML = `<strong>Objective status</strong><br>${everyone}<br><br><strong>Safe Zones</strong><br>${safeZoneStatus || 'No safe zones available.'}`;
+    gearInfo.innerHTML = `<strong>Gear</strong><br>Torch T${me.gear.torch} | Bat T${me.gear.bat} | Slingshot T${me.gear.slingshot}<br><strong>Selected:</strong> ${selectedWeaponLabel} (Q to swap)<br><strong>Pebbles:</strong> ${me.inventory.pebbles}<br><strong>Bat durability:</strong> ${Math.ceil(batDurability.current)}/${batDurability.max}<br><strong>Flashlight:</strong> ${Math.ceil(flashlightBattery.current)}/${flashlightBattery.max} (${flashlightStatus})`;
+
+    const everyone = snapshot.players
+      .map((p) => `${p.objectiveReached ? '✅' : '⬜'} ${p.username}`)
+      .join('<br>');
+    const safeZoneStatus = (snapshot.map.safeZones || [])
+      .map((zone) => `${zone.name}: ${zone.remainingHits}/${zone.maxHits}${zone.destroyed ? ' (destroyed)' : ''}`)
+      .join('<br>');
+    teamInfo.innerHTML = `<strong>Objective status</strong><br>${everyone}<br><br><strong>Safe Zones</strong><br>${safeZoneStatus || 'No safe zones available.'}`;
+  }
 
   eventsList.innerHTML = snapshot.events.map((ev) => `<li>${ev.message}</li>`).join('');
 }
