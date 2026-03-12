@@ -174,6 +174,7 @@ class Game {
       inputs: { up: false, down: false, left: false, right: false },
       wantsCraft: false,
       wantsAttack: false,
+      wantsFortify: false,
       wantsWeaponSwap: false,
       selectedWeapon: 'bat',
       inventory: makeEmptyInventory(),
@@ -233,6 +234,7 @@ class Game {
     p.inputs.right = !!payload.right;
     p.wantsCraft = !!payload.craft;
     p.wantsAttack = !!payload.attack;
+    p.wantsFortify = !!payload.fortify;
     p.wantsWeaponSwap = !!payload.swapWeapon;
 
     if (payload.selectedWeapon === 'bat' || payload.selectedWeapon === 'slingshot') {
@@ -440,9 +442,16 @@ class Game {
         this.handleTileInteractions(p);
       }
 
+      this.updatePlayerSafeZoneState(p);
+
       if (this.phase !== PHASES.LOBBY && p.wantsCraft) {
         this.autoCraft(p);
         p.wantsCraft = false;
+      }
+
+      if (this.phase !== PHASES.LOBBY && p.wantsFortify) {
+        this.handleSafeZoneFortifyIntent(p);
+        p.wantsFortify = false;
       }
 
       if (this.phase !== PHASES.LOBBY && p.wantsWeaponSwap) {
@@ -455,8 +464,6 @@ class Game {
         this.handleAttack(p, now);
         p.attackCooldownUntil = now + ATTACK_COOLDOWN;
       }
-
-      this.updatePlayerSafeZoneState(p);
     });
   }
 
@@ -484,6 +491,48 @@ class Game {
     if (player.safeZoneState.entranceZoneId === insideZone.id) {
       player.safeZoneState.activeZoneId = insideZone.id;
     }
+  }
+
+  getSafeZoneHealthCap(zone) {
+    return Math.max(Number(zone.expandedMaxHits) || 0, Number(zone.maxHits) || 0);
+  }
+
+  getActiveSafeZoneForPlayer(player) {
+    if (!player.safeZoneState?.activeZoneId) return null;
+    const activeZone = this.map.safeZones.find((zone) => zone.id === player.safeZoneState.activeZoneId);
+    if (!activeZone || activeZone.destroyed) return null;
+
+    const insideZone = this.getSafeZoneAtPosition(player.x, player.y, true);
+    if (!insideZone || insideZone.id !== activeZone.id) return null;
+
+    return activeZone;
+  }
+
+  handleSafeZoneFortifyIntent(player) {
+    const zone = this.getActiveSafeZoneForPlayer(player);
+    if (!zone) return;
+
+    let didFortify = false;
+
+    const healthCap = this.getSafeZoneHealthCap(zone);
+    if (player.inventory.wood > 0 && zone.remainingHits < healthCap) {
+      player.inventory.wood -= 1;
+      zone.remainingHits = clamp(zone.remainingHits + 1, 0, healthCap);
+      didFortify = true;
+    }
+
+    const armorCap = Math.max(0, Number(zone.armorMax) || 0);
+    if (player.inventory.stone > 0 && armorCap > 0 && (zone.armorCurrent || 0) < armorCap) {
+      player.inventory.stone -= 1;
+      zone.armorCurrent = clamp((zone.armorCurrent || 0) + 1, 0, armorCap);
+      didFortify = true;
+    }
+
+    if (!didFortify) return;
+
+    this.logEvent(
+      `${player.username} fortified ${zone.name} (HP ${zone.remainingHits}/${healthCap}, Armor ${zone.armorCurrent || 0}/${armorCap}).`,
+    );
   }
 
   setSelectedWeapon(player, weapon) {
@@ -891,8 +940,15 @@ class Game {
       return;
     }
 
-    zone.remainingHits -= 1;
     enemy.zoneAttackCooldownUntil = now + SAFE_ZONE_ATTACK_COOLDOWN;
+
+    if ((zone.armorCurrent || 0) > 0) {
+      zone.armorCurrent = Math.max(0, (zone.armorCurrent || 0) - 1);
+      this.logEvent(`${zone.name} armor absorbed a hit (${zone.armorCurrent}/${zone.armorMax || 0}).`);
+      return;
+    }
+
+    zone.remainingHits -= 1;
 
     if (zone.remainingHits <= 0) {
       zone.remainingHits = 0;
@@ -906,7 +962,7 @@ class Game {
       return;
     }
 
-    this.logEvent(`${zone.name} was hit (${zone.remainingHits}/${zone.maxHits}).`);
+    this.logEvent(`${zone.name} was hit (${zone.remainingHits}/${this.getSafeZoneHealthCap(zone)}).`);
   }
 
   canEnemyMoveTo(x, y) {

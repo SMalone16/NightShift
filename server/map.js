@@ -8,10 +8,10 @@ const ZONES = [
 ];
 
 const SAFE_ZONE_BLUEPRINTS = [
-  { id: 'safe-a', name: 'Safe Zone A', checkpointIndex: 0, width: 4, height: 4, maxHits: 5 },
-  { id: 'safe-b', name: 'Safe Zone B', checkpointIndex: 1, width: 4, height: 4, maxHits: 5 },
-  { id: 'safe-c', name: 'Safe Zone C', checkpointIndex: 2, width: 4, height: 4, maxHits: 6 },
-  { id: 'safe-d', name: 'Safe Zone D', checkpointIndex: 3, width: 4, height: 4, maxHits: 6 },
+  { id: 'safe-a', name: 'Safe Zone A', checkpointIndex: 0, width: 4, height: 4, maxHits: 5, armorMax: 10 },
+  { id: 'safe-b', name: 'Safe Zone B', checkpointIndex: 1, width: 4, height: 4, maxHits: 5, armorMax: 10 },
+  { id: 'safe-c', name: 'Safe Zone C', checkpointIndex: 2, width: 4, height: 4, maxHits: 6, armorMax: 12 },
+  { id: 'safe-d', name: 'Safe Zone D', checkpointIndex: 3, width: 4, height: 4, maxHits: 6, armorMax: 12 },
 ];
 
 const SAFE_ZONE_WALL_SEGMENTS = ['west', 'north', 'east', 'south'];
@@ -141,6 +141,8 @@ function buildSafeZones(grid, checkpoints) {
       wallSegments: placement.wallSegments,
       maxHits: zoneDef.maxHits,
       remainingHits: zoneDef.maxHits,
+      armorCurrent: 0,
+      armorMax: zoneDef.armorMax || 0,
       destroyed: false,
     };
   });

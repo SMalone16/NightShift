@@ -164,6 +164,7 @@ const inputState = {
   left: false,
   right: false,
   craft: false,
+  fortify: false,
   attack: false,
   swapWeapon: false,
 };
@@ -232,6 +233,7 @@ function sendInput() {
   socket.send(JSON.stringify({ type: 'input', payload: inputState }));
   inputState.attack = false;
   inputState.craft = false;
+  inputState.fortify = false;
   inputState.swapWeapon = false;
 }
 
@@ -243,6 +245,7 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'a' || e.key === 'ArrowLeft') inputState.left = true;
   if (e.key === 'd' || e.key === 'ArrowRight') inputState.right = true;
   if (e.key.toLowerCase() === 'e') inputState.craft = true;
+  if (e.key.toLowerCase() === 'f') inputState.fortify = true;
   if (e.code === 'Space') {
     inputState.attack = true;
     e.preventDefault();
@@ -934,7 +937,11 @@ function renderHud() {
       .map((p) => `${p.objectiveReached ? '✅' : '⬜'} ${p.username}`)
       .join('<br>');
     const safeZoneStatus = (snapshot.map.safeZones || [])
-      .map((zone) => `${zone.name}: ${zone.remainingHits}/${zone.maxHits}${zone.destroyed ? ' (destroyed)' : ''}`)
+      .map((zone) => {
+        const armorCurrent = Number(zone.armorCurrent ?? zone.armor ?? 0);
+        const armorMax = Number(zone.armorMax ?? zone.maxArmor ?? 0);
+        return `${zone.name}: HP ${zone.remainingHits}/${zone.maxHits} | ARM ${armorCurrent}/${armorMax}${zone.destroyed ? ' (destroyed)' : ''}`;
+      })
       .join('<br>');
     teamInfo.innerHTML = `<strong>Objective status</strong><br>${everyone}<br><br><strong>Safe Zones</strong><br>${safeZoneStatus || 'No safe zones available.'}`;
   }
