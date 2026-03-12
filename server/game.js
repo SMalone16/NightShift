@@ -39,6 +39,11 @@ const SURVIVAL_XP_INTERVAL_SECONDS = 20;
 const SURVIVAL_XP_REWARD = 2;
 const ZOMBIE_BOP_XP_REWARD = 1;
 const ZOMBIE_DEFEAT_XP_BONUS = 6;
+const NIGHT_WAVES_BASE = 3;
+const NIGHT_WAVES_MAX = 6;
+const NIGHT_WAVE_PLAYER_WEIGHT = 1;
+const NIGHT_WAVE_NIGHT_WEIGHT = 1;
+const NIGHT_LIVE_ENEMY_CAP_BUFFER = 2;
 
 const BAT_DURABILITY_BY_TIER = {
   0: 0,
@@ -129,6 +134,13 @@ class Game {
     this.lobbyTimer = PHASE_LENGTH_SECONDS[PHASES.LOBBY];
     this.roundStatus = 'running';
     this.nightNumber = 0;
+    this.nightWave = {
+      waveIndex: 0,
+      wavesPerNight: 0,
+      cadenceSeconds: 0,
+      nextWaveAt: 0,
+      liveEnemyCap: ENEMY_SPAWN_MAX,
+    };
     this.events = [];
     this.lastEnemySpawnTick = 0;
   }
@@ -265,6 +277,7 @@ class Game {
     }
 
     if (this.phase === PHASES.NIGHT) {
+      this.processNightWaves(now);
       this.grantNightSurvivalXp(now);
       this.updateEnemies(dt, now);
       this.checkObjectiveWin();
@@ -304,12 +317,12 @@ class Game {
       this.phase = PHASES.NIGHT;
       this.phaseTimer = PHASE_LENGTH_SECONDS[PHASES.NIGHT];
       this.nightNumber += 1;
-      this.spawnEnemies();
+      this.startNightWaves(now);
       this.players.forEach((p) => {
         p.objectiveReached = false;
         p.lastSurvivalXpAt = now;
       });
-      this.logEvent(`Night ${this.nightNumber} has fallen. ${this.enemies.length} enemies are hunting. Get to objective together!`);
+      this.logEvent(`Night ${this.nightNumber} has fallen. Wave ${this.nightWave.waveIndex}/${this.nightWave.wavesPerNight} deployed. ${this.enemies.length} enemies are hunting. Get to objective together!`);
       return;
     }
 
@@ -319,6 +332,13 @@ class Game {
   prepareRoundStart(now) {
     this.enemies = [];
     this.projectiles = [];
+    this.nightWave = {
+      waveIndex: 0,
+      wavesPerNight: 0,
+      cadenceSeconds: 0,
+      nextWaveAt: 0,
+      liveEnemyCap: ENEMY_SPAWN_MAX,
+    };
     this.map = generateMap();
     this.mapStaticMetadata = this.buildMapStaticMetadata();
     this.sharedNightMap = this.buildSharedNightMap();
@@ -358,11 +378,70 @@ class Game {
     this.prepareRoundStart(now);
   }
 
-  spawnEnemies() {
-    this.enemies = [];
-    const count = this.getEnemyCountForNight();
+  startNightWaves(now) {
+    const activePlayers = this.getActivePlayerCount();
+    const wavesPerNight = clamp(NIGHT_WAVES_BASE + Math.floor(this.nightNumber / 2), NIGHT_WAVES_BASE, NIGHT_WAVES_MAX);
+    const cadenceSeconds = PHASE_LENGTH_SECONDS[PHASES.NIGHT] / wavesPerNight;
+
+    this.nightWave = {
+      waveIndex: 0,
+      wavesPerNight,
+      cadenceSeconds,
+      nextWaveAt: now,
+      liveEnemyCap: this.getNightLiveEnemyCap(activePlayers),
+    };
+
+    this.spawnNightWave(now, { reason: 'initial' });
+  }
+
+  processNightWaves(now) {
+    if (this.phase !== PHASES.NIGHT) return;
+    if (!this.nightWave || this.nightWave.wavesPerNight <= 0) return;
+    if (this.nightWave.waveIndex >= this.nightWave.wavesPerNight) return;
+
+    while (this.nightWave.waveIndex < this.nightWave.wavesPerNight && now >= this.nightWave.nextWaveAt) {
+      this.spawnNightWave(now, { reason: 'cadence' });
+    }
+  }
+
+  spawnNightWave(now, { reason = 'cadence' } = {}) {
+    if (!this.nightWave || this.nightWave.waveIndex >= this.nightWave.wavesPerNight) return;
+
+    const waveNumber = this.nightWave.waveIndex + 1;
+    const activePlayers = this.getActivePlayerCount();
+    const liveEnemyCap = this.getNightLiveEnemyCap(activePlayers);
+    this.nightWave.liveEnemyCap = liveEnemyCap;
+
+    if (this.enemies.length >= liveEnemyCap) {
+      this.logEvent(`Night ${this.nightNumber} wave ${waveNumber}/${this.nightWave.wavesPerNight} skipped: enemy cap reached (${this.enemies.length}/${liveEnemyCap}).`);
+      this.nightWave.waveIndex = waveNumber;
+      this.nightWave.nextWaveAt = now + this.nightWave.cadenceSeconds;
+      return;
+    }
+
+    const desiredWaveSize = this.getEnemyCountForNightWave(waveNumber, activePlayers);
+    const spawnCount = Math.min(desiredWaveSize, liveEnemyCap - this.enemies.length);
+    const spawned = this.spawnEnemies(spawnCount, {
+      clearExisting: false,
+      logSummary: false,
+    });
+
+    this.nightWave.waveIndex = waveNumber;
+    this.nightWave.nextWaveAt = now + this.nightWave.cadenceSeconds;
+    this.lastEnemySpawnTick = now;
+    this.logEvent(
+      `Night ${this.nightNumber} wave ${waveNumber}/${this.nightWave.wavesPerNight} (${reason}): spawned ${spawned}/${spawnCount}, live ${this.enemies.length}/${liveEnemyCap}.`,
+    );
+  }
+
+  spawnEnemies(count, { clearExisting = true, logSummary = true } = {}) {
+    if (clearExisting) {
+      this.enemies = [];
+    }
+
     const spawnTiles = this.getEnemySpawnCandidates();
     const maxSpawns = Math.min(count, spawnTiles.length);
+    let spawned = 0;
 
     for (let i = 0; i < maxSpawns; i += 1) {
       const idx = Math.floor(Math.random() * spawnTiles.length);
@@ -380,19 +459,35 @@ class Game {
         pathTargetKey: null,
         nextPathRecalcAt: 0,
       });
+      spawned += 1;
     }
 
-    if (this.enemies.length < count) {
-      this.logEvent(`Night ${this.nightNumber}: only ${this.enemies.length}/${count} enemies could be deployed.`);
+    if (logSummary && spawned < count) {
+      this.logEvent(`Night ${this.nightNumber}: only ${spawned}/${count} enemies could be deployed.`);
     }
 
-    this.logEvent(`Night ${this.nightNumber}: ${this.enemies.length} enemies spawned.`);
+    if (logSummary) {
+      this.logEvent(`Night ${this.nightNumber}: ${spawned} enemies spawned.`);
+    }
+
+    return spawned;
   }
 
-  getEnemyCountForNight() {
-    const base = this.players.size + 1;
-    const bonus = Math.floor(Math.max(0, this.nightNumber - 1) / ENEMY_NIGHT_SCALING_FACTOR);
+  getEnemyCountForNightWave(waveNumber, activePlayers = this.getActivePlayerCount()) {
+    const base = activePlayers * NIGHT_WAVE_PLAYER_WEIGHT;
+    const nightBonus = Math.floor(Math.max(0, this.nightNumber - 1) / ENEMY_NIGHT_SCALING_FACTOR) * NIGHT_WAVE_NIGHT_WEIGHT;
+    const waveBonus = Math.max(0, waveNumber - 1);
+    const bonus = nightBonus + waveBonus;
     return clamp(base + bonus, ENEMY_SPAWN_MIN, ENEMY_SPAWN_MAX);
+  }
+
+  getNightLiveEnemyCap(activePlayers = this.getActivePlayerCount()) {
+    const capByPlayers = activePlayers + ENEMY_SPAWN_PLAYER_BUFFER + NIGHT_LIVE_ENEMY_CAP_BUFFER;
+    return clamp(capByPlayers, ENEMY_SPAWN_MIN, ENEMY_SPAWN_MAX);
+  }
+
+  getActivePlayerCount() {
+    return Math.max(1, this.players.size);
   }
 
   getEnemySpawnCandidates() {
