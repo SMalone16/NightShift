@@ -21,6 +21,10 @@ const {
 const { getUserProfile, addXp, touchUser } = require('./persistence');
 
 const PLAYER_SPEED = 5; // tiles per second
+const PLAYER_SPEED_PER_LEVEL = 0.15;
+const PLAYER_ATTACK_POWER_BASE = 1;
+const PLAYER_ATTACK_POWER_PER_LEVEL = 0.2;
+const PLAYER_MAX_HEALTH_PER_LEVEL = 8;
 const ENEMY_SPEED = 3.2;
 const TAG_DURATION = 1.0;
 const ATTACK_COOLDOWN = 0.45;
@@ -91,6 +95,23 @@ function makeHealthState() {
   return {
     current: PLAYER_HEALTH_MAX,
     max: PLAYER_HEALTH_MAX,
+  };
+}
+
+function computePlayerStats(level, gear = makeGear()) {
+  const normalizedLevel = Math.max(1, Number(level) || 1);
+  const torchTier = Math.max(0, Number(gear.torch) || 0);
+  const batTier = Math.max(0, Number(gear.bat) || 0);
+  const slingshotTier = Math.max(0, Number(gear.slingshot) || 0);
+  const bestWeaponTier = Math.max(batTier, slingshotTier);
+
+  return {
+    speed: PLAYER_SPEED + (normalizedLevel - 1) * PLAYER_SPEED_PER_LEVEL,
+    attackPower: PLAYER_ATTACK_POWER_BASE
+      + (normalizedLevel - 1) * PLAYER_ATTACK_POWER_PER_LEVEL
+      + bestWeaponTier * 0.35,
+    maxHealth: PLAYER_HEALTH_MAX + (normalizedLevel - 1) * PLAYER_MAX_HEALTH_PER_LEVEL,
+    visionBonus: torchTier,
   };
 }
 
@@ -201,6 +222,7 @@ class Game {
       selectedWeapon: 'bat',
       inventory: makeEmptyInventory(),
       gear: makeGear(),
+      stats: computePlayerStats(profile.level, makeGear()),
       combat: makeCombatState(),
       health: makeHealthState(),
       taggedUntil: 0,
@@ -222,6 +244,7 @@ class Game {
       lastSurvivalXpAt: 0,
       safeZoneState: { entranceZoneId: null, activeZoneId: null },
     };
+    this.syncPlayerHealthWithStats(player, { refill: true });
     this.players.set(clientId, player);
     this.startLobbyOnFirstPlayer();
     touchUser(username, { xp: player.xp, level: player.level, character: player.character });
@@ -364,10 +387,39 @@ class Game {
       p.taggedUntil = now;
       p.enemyContactCooldownUntil = 0;
       p.invulnerableUntil = now;
-      p.health = makeHealthState();
+      this.syncPlayerHealthWithStats(p, { refill: true });
       p.safeZoneState = { entranceZoneId: null, activeZoneId: null };
       i += 1;
     });
+  }
+
+  recomputePlayerStats(player, { refillHealth = false } = {}) {
+    player.stats = computePlayerStats(player.level, player.gear);
+    this.syncPlayerHealthWithStats(player, { refill: refillHealth });
+  }
+
+  syncPlayerHealthWithStats(player, { refill = false } = {}) {
+    if (!player.health) {
+      player.health = makeHealthState();
+    }
+
+    const maxHealth = Math.max(1, Math.round(player.stats?.maxHealth || PLAYER_HEALTH_MAX));
+    const previousMax = Math.max(1, Number(player.health.max) || PLAYER_HEALTH_MAX);
+    const currentHealth = Number(player.health.current) || 0;
+    player.health.max = maxHealth;
+
+    if (refill) {
+      player.health.current = maxHealth;
+      return;
+    }
+
+    if (previousMax === maxHealth) {
+      player.health.current = clamp(currentHealth, 0, maxHealth);
+      return;
+    }
+
+    const ratio = clamp(currentHealth / previousMax, 0, 1);
+    player.health.current = clamp(Math.round(maxHealth * ratio), 0, maxHealth);
   }
 
   resetRound(success, now) {
@@ -376,6 +428,7 @@ class Game {
         const updated = addXp(p.username, 30);
         p.xp = updated.xp;
         p.level = updated.level;
+        this.recomputePlayerStats(p);
       });
       this.logEvent('Round success! Team extracted and gained XP.');
     } else {
@@ -536,7 +589,7 @@ class Game {
       const dx = (p.inputs.right ? 1 : 0) - (p.inputs.left ? 1 : 0);
       const dy = (p.inputs.down ? 1 : 0) - (p.inputs.up ? 1 : 0);
       const mag = Math.hypot(dx, dy) || 1;
-      const step = (PLAYER_SPEED * slow * dt) / mag;
+      const step = ((p.stats?.speed || PLAYER_SPEED) * slow * dt) / mag;
       if (canMove && (dx !== 0 || dy !== 0)) {
         p.facingX = dx / mag;
         p.facingY = dy / mag;
@@ -770,6 +823,8 @@ class Game {
 
   // Keep stat initialization tied to crafted/upgraded gear to avoid client-side duplication.
   applyGearStats(player, item) {
+    this.recomputePlayerStats(player);
+
     if (item === 'bat') {
       const maxDurability = this.getBatDurabilityMax(player.gear.bat);
       player.combat.batDurability.max = maxDurability;
@@ -810,6 +865,7 @@ class Game {
         vy: dirY * speed,
         ttl,
         stun: 0.55 + 0.12 * player.gear.slingshot,
+        damage: Math.max(1, Math.round((player.stats?.attackPower || PLAYER_ATTACK_POWER_BASE) * (1 + tier * 0.1))),
       });
       this.logEvent(`${player.username} fired slingshot.`);
       return;
@@ -834,7 +890,7 @@ class Game {
         if (Math.abs(e.x - player.x) <= 1 && Math.abs(e.y - player.y) <= 1) {
           const wasDefeated = this.applyDamageToEnemy(e, {
             now,
-            damage: 1,
+            damage: Math.max(1, Math.round((player.stats?.attackPower || PLAYER_ATTACK_POWER_BASE) * (1 + player.gear.bat * 0.15))),
             stunDuration: 0.5 + 0.2 * player.gear.bat,
             sourceToken: `${swingToken}:${e.id}`,
             attackerId: player.id,
@@ -875,7 +931,7 @@ class Game {
         if (Math.abs(e.x - proj.x) < 0.7 && Math.abs(e.y - proj.y) < 0.7) {
           const wasDefeated = this.applyDamageToEnemy(e, {
             now,
-            damage: 1,
+            damage: Math.max(1, proj.damage || 1),
             stunDuration: proj.stun,
             sourceToken: `projectile:${proj.id}:${e.id}`,
             attackerId: proj.ownerId,
@@ -1271,8 +1327,12 @@ class Game {
 
   rewardXp(player, amount, { category = null } = {}) {
     const updated = addXp(player.username, amount);
+    const previousLevel = player.level;
     player.xp = updated.xp;
     player.level = updated.level;
+    if (previousLevel !== player.level) {
+      this.recomputePlayerStats(player);
+    }
 
     if (!category) return;
 
@@ -1395,6 +1455,7 @@ class Game {
           inventory: p.inventory,
           gear: p.gear,
           combat: p.combat,
+          stats: p.stats,
           health: p.health,
           flashlightActive: this.isFlashlightActive(p),
           invulnerable: now < p.invulnerableUntil,
