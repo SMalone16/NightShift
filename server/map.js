@@ -14,6 +14,8 @@ const SAFE_ZONE_BLUEPRINTS = [
   { id: 'safe-d', name: 'Safe Zone D', checkpointIndex: 3, width: 4, height: 4, maxHits: 6 },
 ];
 
+const SAFE_ZONE_WALL_SEGMENTS = ['west', 'north', 'east', 'south'];
+
 function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
@@ -93,18 +95,30 @@ function buildSafeZones(grid, checkpoints) {
         }
       }
 
-      const entrances = [];
-      const entranceY = origin.y + height;
-      for (let x = origin.x; x < origin.x + width; x += 1) {
-        entrances.push({ x, y: entranceY });
+      const wallSegments = {
+        west: [],
+        north: [],
+        east: [],
+        south: [],
+      };
+
+      for (let y = origin.y; y < origin.y + height; y += 1) {
+        wallSegments.west.push({ x: origin.x - 1, y });
+        wallSegments.east.push({ x: origin.x + width, y });
       }
 
-      const footprint = [...tiles, ...entrances];
+      for (let x = origin.x; x < origin.x + width; x += 1) {
+        wallSegments.north.push({ x, y: origin.y - 1 });
+        wallSegments.south.push({ x, y: origin.y + height });
+      }
+
+      const entrances = [...wallSegments.south];
+      const footprint = [...tiles, ...SAFE_ZONE_WALL_SEGMENTS.flatMap((segment) => wallSegments[segment])];
       const isValidFootprint = footprint.every((tile) => !isSafeZoneFootprintBlocked(grid, tile) && !occupiedTiles.has(`${tile.x},${tile.y}`));
 
       if (!isValidFootprint) return false;
 
-      placement = { origin, tiles, entrances };
+      placement = { origin, tiles, entrances, wallSegments };
       return true;
     });
 
@@ -112,7 +126,7 @@ function buildSafeZones(grid, checkpoints) {
       throw new Error(`Unable to place safe zone ${zoneDef.id}: blocked or out-of-bounds footprint`);
     }
 
-    [...placement.tiles, ...placement.entrances].forEach((tile) => {
+    [...placement.tiles, ...SAFE_ZONE_WALL_SEGMENTS.flatMap((segment) => placement.wallSegments[segment])].forEach((tile) => {
       occupiedTiles.add(`${tile.x},${tile.y}`);
     });
 
@@ -124,6 +138,7 @@ function buildSafeZones(grid, checkpoints) {
       height,
       tiles: placement.tiles,
       entrances: placement.entrances,
+      wallSegments: placement.wallSegments,
       maxHits: zoneDef.maxHits,
       remainingHits: zoneDef.maxHits,
       destroyed: false,
@@ -174,7 +189,10 @@ function generateMap() {
 
   const safeZones = buildSafeZones(grid, checkpoints);
   const reservedSafeZoneTiles = new Set(
-    safeZones.flatMap((zone) => [...zone.tiles, ...zone.entrances].map((tile) => `${tile.x},${tile.y}`)),
+    safeZones.flatMap((zone) => {
+      const wallTiles = SAFE_ZONE_WALL_SEGMENTS.flatMap((segment) => zone.wallSegments?.[segment] || []);
+      return [...zone.tiles, ...wallTiles].map((tile) => `${tile.x},${tile.y}`);
+    }),
   );
   const canPlaceOnUnreservedTile = (x, y) => !reservedSafeZoneTiles.has(`${x},${y}`);
 
