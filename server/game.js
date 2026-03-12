@@ -1080,10 +1080,12 @@ class Game {
     });
 
     occupiedSafeZones.forEach((zone) => {
-      zone.entrances.forEach((entrance) => {
-        const d = distManhattan({ x: enemy.x, y: enemy.y }, entrance);
+      const attackSegments = ['west', 'north', 'east'];
+      const attackPoints = attackSegments.flatMap((segment) => zone.wallSegments?.[segment] || []);
+      attackPoints.forEach((attackPoint) => {
+        const d = distManhattan({ x: enemy.x, y: enemy.y }, attackPoint);
         if (!bestZone || d < bestZone.dist) {
-          bestZone = { zone, position: entrance, dist: d };
+          bestZone = { zone, position: attackPoint, dist: d };
         }
       });
     });
