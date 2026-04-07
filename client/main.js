@@ -88,6 +88,19 @@ const ASSETS = {
     rock: 'assets/sprites/tiles/rock.png',
     chestClosed: 'assets/sprites/tiles/chest_closed.png',
   },
+  enemies: {
+    zombie: {
+      idle: {
+        down: ['assets/sprites/enemy/enemy.png'],
+      },
+      walk: {
+        down: ['assets/sprites/enemy/enemy.png'],
+      },
+      attack: {
+        down: ['assets/sprites/enemy/enemy.png'],
+      },
+    },
+  },
   characters: {
     ranger: BASE_PLAYER_ASSET_SET,
     scout: {
@@ -114,6 +127,7 @@ let selfId = null;
 let snapshot = null;
 let sharedSnapshot = null;
 const playerAnimTimers = new Map();
+const enemyAnimTimers = new Map();
 let selectedCharacter = 'ranger';
 let localLevelUpFxUntil = 0;
 let localLevelUpLevel = 1;
@@ -126,6 +140,11 @@ const PLAYER_FRAME_MS = {
   swing: 85,
 };
 const ATTACK_ACTION_WINDOW_SECONDS = 0.22;
+const ENEMY_FRAME_MS = {
+  idle: 300,
+  walk: 140,
+  attack: 120,
+};
 
 function loadImage(src) {
   return new Promise((resolve) => {
@@ -376,6 +395,55 @@ function getPlayerAnimState(player, now) {
   };
 }
 
+function getDirectionFromDelta(deltaX = 0, deltaY = 0, fallbackDirection = 'down') {
+  if (Math.abs(deltaX) < 0.0001 && Math.abs(deltaY) < 0.0001) {
+    return fallbackDirection;
+  }
+  if (Math.abs(deltaX) >= Math.abs(deltaY)) {
+    return deltaX < 0 ? 'left' : 'right';
+  }
+  return deltaY < 0 ? 'up' : 'down';
+}
+
+function getEnemyAnimState(enemy, now) {
+  const animData = enemyAnimTimers.get(enemy.id) || {
+    prevX: enemy.x,
+    prevY: enemy.y,
+    lastUpdateAt: now,
+    frameElapsed: 0,
+    frameIndex: 0,
+    direction: 'down',
+  };
+
+  const deltaMs = Math.max(0, now - animData.lastUpdateAt);
+  const deltaX = enemy.x - animData.prevX;
+  const deltaY = enemy.y - animData.prevY;
+  const moved = Math.hypot(deltaX, deltaY) > 0.002;
+  const direction = getDirectionFromDelta(deltaX, deltaY, animData.direction);
+  const action = enemy.stunnedUntil > Date.now() / 1000
+    ? 'attack'
+    : (moved ? 'walk' : 'idle');
+  const frameDurationMs = ENEMY_FRAME_MS[action] || ENEMY_FRAME_MS.idle;
+  animData.frameElapsed += deltaMs;
+  if (animData.frameElapsed >= frameDurationMs) {
+    const advancedFrames = Math.floor(animData.frameElapsed / frameDurationMs);
+    animData.frameElapsed -= advancedFrames * frameDurationMs;
+    animData.frameIndex += advancedFrames;
+  }
+
+  animData.prevX = enemy.x;
+  animData.prevY = enemy.y;
+  animData.lastUpdateAt = now;
+  animData.direction = direction;
+  enemyAnimTimers.set(enemy.id, animData);
+
+  return {
+    direction,
+    action,
+    frameIndex: animData.frameIndex,
+  };
+}
+
 function getAnimationFramesForState(animState, character = 'ranger') {
   const direction = animState.direction;
   const activeCharacterAssets = loadedAssets?.characters?.[character] || loadedAssets?.characters?.ranger;
@@ -397,6 +465,31 @@ function getAnimationFramesForState(animState, character = 'ranger') {
 
   const idleDown = activeCharacterAssets?.idle?.down || loadedAssets?.characters?.ranger?.idle?.down;
   if (idleDown) return [idleDown];
+  return [];
+}
+
+function getEnemyAnimationFramesForState(animState, enemyType = 'zombie') {
+  const enemyAssets = loadedAssets?.enemies?.[enemyType] || loadedAssets?.enemies?.zombie;
+  const actionFrames = enemyAssets?.[animState.action]?.[animState.direction];
+  if (Array.isArray(actionFrames) && actionFrames.length) {
+    return actionFrames;
+  }
+
+  const actionFallback = enemyAssets?.[animState.action]?.down;
+  if (Array.isArray(actionFallback) && actionFallback.length) {
+    return actionFallback;
+  }
+
+  const walkFallback = enemyAssets?.walk?.down;
+  if (Array.isArray(walkFallback) && walkFallback.length) {
+    return walkFallback;
+  }
+
+  const idleFallback = enemyAssets?.idle?.down;
+  if (Array.isArray(idleFallback) && idleFallback.length) {
+    return idleFallback;
+  }
+
   return [];
 }
 
@@ -848,8 +941,16 @@ function render() {
     const screen = worldToScreen(enemy.x, enemy.y, camera);
     if (!isOnScreen(screen.x, screen.y, 20)) return;
     const stunned = enemy.stunnedUntil > Date.now() / 1000;
-    ctx.fillStyle = stunned ? '#c47dfa' : '#c53939';
-    ctx.fillRect(screen.x - 10, screen.y - 10, 20, 20);
+    const animState = getEnemyAnimState(enemy, now);
+    const frames = getEnemyAnimationFramesForState(animState, enemy.type || 'zombie');
+    const sprite = frames.length ? frames[animState.frameIndex % frames.length] : null;
+
+    if (sprite) {
+      ctx.drawImage(sprite, screen.x - TILE_SIZE / 2, screen.y - TILE_SIZE / 2, TILE_SIZE, TILE_SIZE);
+    } else {
+      ctx.fillStyle = stunned ? '#c47dfa' : '#c53939';
+      ctx.fillRect(screen.x - 10, screen.y - 10, 20, 20);
+    }
 
     if ((enemy.maxHp || 0) > 0) {
       const ratio = clamp((enemy.hp || 0) / enemy.maxHp, 0, 1);
