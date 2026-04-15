@@ -53,6 +53,7 @@ const NIGHT_WAVES_MAX = 6;
 const NIGHT_WAVE_PLAYER_WEIGHT = 1;
 const NIGHT_WAVE_NIGHT_WEIGHT = 1;
 const NIGHT_LIVE_ENEMY_CAP_BUFFER = 2;
+const HUMAN_PLAYER_STATE = 'HUMAN';
 
 const BAT_DURABILITY_BY_TIER = {
   0: 0,
@@ -1044,13 +1045,38 @@ class Game {
         return;
       }
 
+      // Keep zombie melee targeting narrow and explicit: only HUMAN-state players are valid
+      // contact-damage recipients. Do not broaden this gate without confirming game-mode rules.
       if (Math.abs(enemy.x - target.player.x) < 0.75 && Math.abs(enemy.y - target.player.y) < 0.75) {
         this.applyEnemyContactDamage(target.player, now);
       }
     });
   }
 
+  getPlayerStateForZombieMelee(player) {
+    const rawState = player?.state || player?.playerState || player?.combatState || player?.roleState;
+    if (typeof rawState === 'string' && rawState.trim()) {
+      return rawState.trim().toUpperCase();
+    }
+
+    // Default to HUMAN for legacy player payloads that do not include explicit state fields.
+    return HUMAN_PLAYER_STATE;
+  }
+
+  isPlayerEligibleForZombieMelee(player, now) {
+    const normalizedState = this.getPlayerStateForZombieMelee(player);
+    if (normalizedState !== HUMAN_PLAYER_STATE) return false;
+
+    // Explicitly block players in defeated cooldown (post-respawn invulnerability window).
+    if (now < (player.invulnerableUntil || 0)) return false;
+
+    return true;
+  }
+
   applyEnemyContactDamage(player, now) {
+    // Final melee-resolution eligibility check. This guard prevents accidental regressions where
+    // zombie contact damage could hit non-HUMAN states (zombies/spectators/cooldown players).
+    if (!this.isPlayerEligibleForZombieMelee(player, now)) return;
     if (now < player.enemyContactCooldownUntil || now < player.invulnerableUntil) return;
 
     player.enemyContactCooldownUntil = now + ENEMY_CONTACT_DAMAGE_COOLDOWN;
