@@ -136,6 +136,7 @@ let lastServerLevelUpFxUntil = 0;
 const PLAYER_FRAME_MS = {
   idle: 280,
   walk: 130,
+  sprint: 95,
   fire: 85,
   swing: 85,
 };
@@ -185,6 +186,7 @@ const inputState = {
   down: false,
   left: false,
   right: false,
+  sprint: false,
   craft: false,
   fortify: false,
   attack: false,
@@ -397,6 +399,7 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 's' || e.key === 'ArrowDown') inputState.down = true;
   if (e.key === 'a' || e.key === 'ArrowLeft') inputState.left = true;
   if (e.key === 'd' || e.key === 'ArrowRight') inputState.right = true;
+  if (e.key === 'Shift') inputState.sprint = true;
   if (e.key.toLowerCase() === 'e') inputState.craft = true;
   if (e.key.toLowerCase() === 'f') inputState.fortify = true;
   if (e.code === 'Space') {
@@ -414,6 +417,15 @@ window.addEventListener('keyup', (e) => {
   if (e.key === 's' || e.key === 'ArrowDown') inputState.down = false;
   if (e.key === 'a' || e.key === 'ArrowLeft') inputState.left = false;
   if (e.key === 'd' || e.key === 'ArrowRight') inputState.right = false;
+  if (e.key === 'Shift') inputState.sprint = false;
+});
+
+window.addEventListener('blur', () => {
+  inputState.up = false;
+  inputState.down = false;
+  inputState.left = false;
+  inputState.right = false;
+  inputState.sprint = false;
 });
 
 
@@ -495,7 +507,9 @@ function getPlayerAnimState(player, now) {
   const deltaMs = Math.max(0, now - animData.lastUpdateAt);
   const moved = Math.hypot(player.x - animData.prevX, player.y - animData.prevY) > 0.002;
   const direction = getDirectionFromFacing(player.facingX ?? 1, player.facingY ?? 0);
-  const locomotion = moved ? 'walk' : 'idle';
+  // Keep movement render-only on the client; sprinting state comes from server snapshots.
+  const isSprinting = !!player.isSprinting;
+  const locomotion = moved ? (isSprinting ? 'sprint' : 'walk') : 'idle';
   const weaponPosture = player.selectedWeapon === 'slingshot' ? 'slingshot' : 'bat';
   const nowSeconds = Date.now() / 1000;
   const recentAttack = Number(player.lastAttackAt) > 0 && (nowSeconds - Number(player.lastAttackAt)) < ATTACK_ACTION_WINDOW_SECONDS;
@@ -520,6 +534,7 @@ function getPlayerAnimState(player, now) {
   return {
     direction,
     locomotion,
+    isSprinting,
     weaponPosture,
     action,
     frameIndex: animData.frameIndex,
@@ -584,13 +599,14 @@ function getAnimationFramesForState(animState, character = 'ranger') {
     return actionFrames;
   }
 
-  const locomotionFrames = activeCharacterAssets?.[animState.locomotion]?.[direction];
+  const locomotionKey = animState.locomotion === 'sprint' ? 'walk' : animState.locomotion;
+  const locomotionFrames = activeCharacterAssets?.[locomotionKey]?.[direction];
   if (Array.isArray(locomotionFrames) && locomotionFrames.length) {
     return locomotionFrames;
   }
 
   const fallbackWalkFrames = activeCharacterAssets?.walk?.left || loadedAssets?.characters?.ranger?.walk?.left;
-  if (Array.isArray(fallbackWalkFrames) && fallbackWalkFrames.length && animState.locomotion === 'walk') {
+  if (Array.isArray(fallbackWalkFrames) && fallbackWalkFrames.length && animState.locomotion !== 'idle') {
     return fallbackWalkFrames;
   }
 
@@ -1227,12 +1243,14 @@ function renderHud() {
   const combatLevel = Number(me.combatLevel ?? me.roundCombatLevel ?? 1);
 
   if (lobbyActive) {
-    playerInfo.innerHTML = `<strong>${me.username}</strong> (${(me.character || 'ranger').toUpperCase()}) — Profile XP ${profileXp}, Profile Level ${profileLevel}<br><strong>Round combat level:</strong> ${combatLevel} (resets to 1 each round)<br><strong>Lobby countdown:</strong> ${Math.max(0, activeTimer)}s`;
+    const sprintLabel = me.isSprinting ? 'Yes' : 'No';
+    playerInfo.innerHTML = `<strong>${me.username}</strong> (${(me.character || 'ranger').toUpperCase()}) — Profile XP ${profileXp}, Profile Level ${profileLevel}<br><strong>Round combat level:</strong> ${combatLevel} (resets to 1 each round)<br><strong>Sprinting (server):</strong> ${sprintLabel}<br><strong>Lobby countdown:</strong> ${Math.max(0, activeTimer)}s`;
     inventoryInfo.innerHTML = '<strong>Lobby staging</strong><br>Combat and crafting are disabled while players connect and assets finish loading.';
     gearInfo.innerHTML = '<strong>Get ready</strong><br>Use this time to confirm controls and wait for teammates.';
     teamInfo.innerHTML = `<strong>Connected players</strong><br>${snapshot.players.map((p) => `• ${p.username}`).join('<br>')}`;
   } else {
-    playerInfo.innerHTML = `<strong>${me.username}</strong> (${(me.character || 'ranger').toUpperCase()}) — Round Combat Lv ${combatLevel}, HP ${Math.ceil(health.current)}/${health.max}<br><strong>Profile progression:</strong> XP ${profileXp}, Lv ${profileLevel}`;
+    const sprintLabel = me.isSprinting ? 'Yes' : 'No';
+    playerInfo.innerHTML = `<strong>${me.username}</strong> (${(me.character || 'ranger').toUpperCase()}) — Round Combat Lv ${combatLevel}, HP ${Math.ceil(health.current)}/${health.max}<br><strong>Sprinting (server):</strong> ${sprintLabel}<br><strong>Profile progression:</strong> XP ${profileXp}, Lv ${profileLevel}`;
     const resources = Array.isArray(snapshot.materials) ? snapshot.materials : Object.keys(me.inventory || {});
     inventoryInfo.innerHTML = [
       '<strong>Resources</strong>',
