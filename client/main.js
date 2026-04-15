@@ -257,6 +257,61 @@ function cycleSpectatorFollowTarget(direction = 1) {
   return true;
 }
 
+function getPlayerStamina(player) {
+  const candidate = player?.stamina || player?.combat?.stamina;
+  if (!candidate || typeof candidate !== 'object') return null;
+  const max = Number(candidate.max);
+  if (!Number.isFinite(max) || max <= 0) return null;
+  const current = Number(candidate.current);
+  return {
+    current: Number.isFinite(current) ? current : 0,
+    max,
+  };
+}
+
+function shouldRenderPlayerStaminaBar(isSelf, renderForAllPlayers = false) {
+  // Keep stamina local-player-only for now: showing every player's stamina leaks combat intent.
+  // This branch makes the future "render for all players" toggle a one-flag change.
+  return renderForAllPlayers || isSelf;
+}
+
+function drawOverheadBar(screen, { width, height, yOffset, ratio, fillColor }) {
+  const barX = screen.x - (width / 2);
+  const barY = screen.y + yOffset;
+  ctx.fillStyle = 'rgba(15, 20, 26, 0.9)';
+  ctx.fillRect(barX, barY, width, height);
+  ctx.fillStyle = fillColor;
+  ctx.fillRect(barX, barY, width * ratio, height);
+  ctx.strokeStyle = 'rgba(228, 238, 255, 0.45)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(barX, barY, width, height);
+}
+
+function drawPlayerCombatBars(player, screen, isSelf) {
+  if (player.health?.max > 0) {
+    const healthRatio = clamp((player.health.current || 0) / player.health.max, 0, 1);
+    drawOverheadBar(screen, {
+      width: 26,
+      height: 4,
+      yOffset: -22,
+      ratio: healthRatio,
+      fillColor: isSelf ? '#7de18a' : '#d95f5f',
+    });
+  }
+
+  const stamina = getPlayerStamina(player);
+  if (stamina && shouldRenderPlayerStaminaBar(isSelf)) {
+    const staminaRatio = clamp(stamina.current / stamina.max, 0, 1);
+    drawOverheadBar(screen, {
+      width: 24,
+      height: 3,
+      yOffset: 18,
+      ratio: staminaRatio,
+      fillColor: '#62b7ff',
+    });
+  }
+}
+
 function setSelectedCharacter(character) {
   if (!AVAILABLE_CHARACTERS.includes(character)) return;
   selectedCharacter = character;
@@ -1105,20 +1160,7 @@ function render() {
     ctx.lineTo(tipX, tipY);
     ctx.stroke();
 
-    if (player.health?.max > 0) {
-      const barWidth = 26;
-      const barHeight = 4;
-      const ratio = clamp((player.health.current || 0) / player.health.max, 0, 1);
-      const barX = screen.x - (barWidth / 2);
-      const barY = screen.y - 22;
-      ctx.fillStyle = 'rgba(15, 20, 26, 0.9)';
-      ctx.fillRect(barX, barY, barWidth, barHeight);
-      ctx.fillStyle = player.id === selfId ? '#7de18a' : '#d95f5f';
-      ctx.fillRect(barX, barY, barWidth * ratio, barHeight);
-      ctx.strokeStyle = 'rgba(228, 238, 255, 0.45)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(barX, barY, barWidth, barHeight);
-    }
+    drawPlayerCombatBars(player, screen, isSelf);
 
     ctx.fillStyle = '#10151d';
     ctx.font = '12px sans-serif';
