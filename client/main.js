@@ -826,7 +826,7 @@ function syncLocalLevelUpFx(me) {
   const serverFxUntil = Number(me?.levelUpFxUntil) || 0;
   if (serverFxUntil > lastServerLevelUpFxUntil && serverFxUntil > nowSeconds) {
     localLevelUpFxUntil = performance.now() / 1000 + 1;
-    localLevelUpLevel = Number(me?.level) || localLevelUpLevel;
+    localLevelUpLevel = Number(me?.profileLevel ?? me?.level) || localLevelUpLevel;
   }
   lastServerLevelUpFxUntil = serverFxUntil;
 }
@@ -1063,14 +1063,17 @@ function renderHud() {
   const activeTimer = lobbyActive ? (snapshot.lobbyTimer ?? snapshot.timer ?? 0) : (snapshot.timer ?? 0);
   phaseInfo.innerHTML = `<strong>Cycle:</strong> ${phaseLabel} | <strong>Time:</strong> ${Math.max(0, activeTimer)}s`;
   const health = me.health || { current: 0, max: 0 };
+  const profileXp = Number(me.profileXp ?? me.xp ?? 0);
+  const profileLevel = Number(me.profileLevel ?? me.level ?? 1);
+  const combatLevel = Number(me.combatLevel ?? me.roundCombatLevel ?? 1);
 
   if (lobbyActive) {
-    playerInfo.innerHTML = `<strong>${me.username}</strong> (${(me.character || 'ranger').toUpperCase()}) — XP ${me.xp}, Level ${me.level}<br><strong>Lobby countdown:</strong> ${Math.max(0, activeTimer)}s`;
+    playerInfo.innerHTML = `<strong>${me.username}</strong> (${(me.character || 'ranger').toUpperCase()}) — Profile XP ${profileXp}, Profile Level ${profileLevel}<br><strong>Round combat level:</strong> ${combatLevel} (resets to 1 each round)<br><strong>Lobby countdown:</strong> ${Math.max(0, activeTimer)}s`;
     inventoryInfo.innerHTML = '<strong>Lobby staging</strong><br>Combat and crafting are disabled while players connect and assets finish loading.';
     gearInfo.innerHTML = '<strong>Get ready</strong><br>Use this time to confirm controls and wait for teammates.';
     teamInfo.innerHTML = `<strong>Connected players</strong><br>${snapshot.players.map((p) => `• ${p.username}`).join('<br>')}`;
   } else {
-    playerInfo.innerHTML = `<strong>${me.username}</strong> (${(me.character || 'ranger').toUpperCase()}) — XP ${me.xp}, Level ${me.level}, HP ${Math.ceil(health.current)}/${health.max}`;
+    playerInfo.innerHTML = `<strong>${me.username}</strong> (${(me.character || 'ranger').toUpperCase()}) — Round Combat Lv ${combatLevel}, HP ${Math.ceil(health.current)}/${health.max}<br><strong>Profile progression:</strong> XP ${profileXp}, Lv ${profileLevel}`;
     const resources = Array.isArray(snapshot.materials) ? snapshot.materials : Object.keys(me.inventory || {});
     inventoryInfo.innerHTML = [
       '<strong>Resources</strong>',
