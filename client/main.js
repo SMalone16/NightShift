@@ -191,6 +191,72 @@ const inputState = {
   swapWeapon: false,
 };
 
+const SPECTATOR_STATE = 'SPECTATOR';
+const SPECTATOR_CYCLE_HINT = 'Tab / [ / ]';
+let spectatorFollowPlayerId = null;
+
+function getNormalizedPlayerState(player) {
+  const rawState = player?.state || player?.playerState || player?.combatState || player?.roleState;
+  if (typeof rawState !== 'string') return '';
+  return rawState.trim().toUpperCase();
+}
+
+function isSpectatorPlayer(player) {
+  return getNormalizedPlayerState(player) === SPECTATOR_STATE;
+}
+
+function isActiveSpectateTarget(player) {
+  if (!player) return false;
+  if (isSpectatorPlayer(player)) return false;
+  if (!Number.isFinite(player.x) || !Number.isFinite(player.y)) return false;
+  if (typeof player.connected === 'boolean' && !player.connected) return false;
+  if (typeof player.active === 'boolean' && !player.active) return false;
+  return true;
+}
+
+function getSpectateTargets(players, localPlayerId) {
+  return players.filter((player) => player.id !== localPlayerId && isActiveSpectateTarget(player));
+}
+
+function getMapCenterAnchor(map) {
+  const dims = getMapDimensions(map);
+  return {
+    x: dims.width / 2,
+    y: dims.height / 2,
+  };
+}
+
+function getSpectatorFollowTarget(localPlayer, players) {
+  const targets = getSpectateTargets(players, localPlayer.id);
+  if (!targets.length) {
+    spectatorFollowPlayerId = null;
+    return null;
+  }
+
+  const persisted = targets.find((player) => player.id === spectatorFollowPlayerId);
+  if (persisted) return persisted;
+
+  spectatorFollowPlayerId = targets[0].id;
+  return targets[0];
+}
+
+function cycleSpectatorFollowTarget(direction = 1) {
+  if (!snapshot || !selfId) return false;
+  const localPlayer = snapshot.players.find((player) => player.id === selfId);
+  if (!localPlayer || !isSpectatorPlayer(localPlayer)) return false;
+
+  const targets = getSpectateTargets(snapshot.players, selfId);
+  if (!targets.length) {
+    spectatorFollowPlayerId = null;
+    return false;
+  }
+
+  const currentIndex = Math.max(0, targets.findIndex((player) => player.id === spectatorFollowPlayerId));
+  const nextIndex = (currentIndex + direction + targets.length) % targets.length;
+  spectatorFollowPlayerId = targets[nextIndex].id;
+  return true;
+}
+
 function setSelectedCharacter(character) {
   if (!AVAILABLE_CHARACTERS.includes(character)) return;
   selectedCharacter = character;
@@ -262,6 +328,16 @@ function sendInput() {
 setInterval(sendInput, 50);
 
 window.addEventListener('keydown', (e) => {
+  if (e.key === 'Tab' || e.key === '[' || e.key === ']') {
+    const localPlayer = snapshot?.players?.find((player) => player.id === selfId);
+    const localIsSpectator = isSpectatorPlayer(localPlayer);
+    const direction = e.key === '[' ? -1 : 1;
+    if (localIsSpectator) {
+      cycleSpectatorFollowTarget(direction);
+      e.preventDefault();
+    }
+  }
+
   if (e.key === 'w' || e.key === 'ArrowUp') inputState.up = true;
   if (e.key === 's' || e.key === 'ArrowDown') inputState.down = true;
   if (e.key === 'a' || e.key === 'ArrowLeft') inputState.left = true;
@@ -821,6 +897,34 @@ function drawLobbyOverlay(timerSeconds) {
   ctx.restore();
 }
 
+function drawSpectatorBanner(followTarget) {
+  const bannerWidth = 480;
+  const bannerHeight = 64;
+  const x = (canvas.width - bannerWidth) / 2;
+  const y = 16;
+
+  const targetLabel = followTarget?.username || 'Map Center';
+  const followLine = followTarget
+    ? `Following: ${targetLabel}`
+    : 'No active players — camera locked to map center';
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(8, 11, 20, 0.82)';
+  ctx.strokeStyle = 'rgba(187, 207, 244, 0.88)';
+  ctx.lineWidth = 2;
+  ctx.fillRect(x, y, bannerWidth, bannerHeight);
+  ctx.strokeRect(x, y, bannerWidth, bannerHeight);
+  ctx.fillStyle = '#e8edf5';
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 16px sans-serif';
+  ctx.fillText('SPECTATOR MODE', canvas.width / 2, y + 24);
+  ctx.font = '13px sans-serif';
+  ctx.fillStyle = '#b8c7dd';
+  ctx.fillText(`${followLine} • Cycle target: ${SPECTATOR_CYCLE_HINT}`, canvas.width / 2, y + 46);
+  ctx.textAlign = 'start';
+  ctx.restore();
+}
+
 function syncLocalLevelUpFx(me) {
   const nowSeconds = Date.now() / 1000;
   const serverFxUntil = Number(me?.levelUpFxUntil) || 0;
@@ -883,13 +987,18 @@ function render() {
   const map = snapshot.map;
   const me = snapshot.players.find((p) => p.id === selfId);
   if (!me) return;
+  const localIsSpectator = isSpectatorPlayer(me);
+  const spectatorFollowTarget = localIsSpectator
+    ? getSpectatorFollowTarget(me, snapshot.players)
+    : null;
+  const cameraAnchor = spectatorFollowTarget || (localIsSpectator ? getMapCenterAnchor(map) : me);
 
   syncLocalLevelUpFx(me);
 
   const lightingMode = getLightingMode();
   const tileColors = lightingMode === 'night' ? NIGHT_COLORS : DAY_COLORS;
   const grassUnderlayColor = tileColors[TILE.GRASS] || DAY_COLORS[TILE.GRASS];
-  const camera = getCamera(map, me);
+  const camera = getCamera(map, cameraAnchor);
   const now = performance.now();
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -1016,14 +1125,16 @@ function render() {
     ctx.fillText(player.username, screen.x - 20, screen.y - 12);
   });
 
-  drawLocalLevelUpEffect(me, camera);
+  if (!localIsSpectator) {
+    drawLocalLevelUpEffect(me, camera);
+  }
 
   if (lightingMode === 'night' && snapshot.visionRadius) {
     ctx.save();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    const center = worldToScreen(me.x, me.y, camera);
+    const center = worldToScreen(cameraAnchor.x, cameraAnchor.y, camera);
     const radiusPx = snapshot.visionRadius * TILE_SIZE;
     const gradient = ctx.createRadialGradient(
       center.x,
@@ -1047,8 +1158,14 @@ function render() {
   if (isLobbyPhase()) {
     drawLobbyOverlay(snapshot.lobbyTimer ?? snapshot.timer);
   } else {
-    drawGameplayHud(me, lightingMode);
-    drawZoneOverlay(map, me, camera);
+    if (!localIsSpectator) {
+      drawGameplayHud(me, lightingMode);
+      drawZoneOverlay(map, me, camera);
+    }
+  }
+
+  if (localIsSpectator) {
+    drawSpectatorBanner(spectatorFollowTarget);
   }
 }
 
