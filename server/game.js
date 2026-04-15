@@ -588,11 +588,31 @@ class Game {
     return true;
   }
 
+  canMove(player) {
+    return this.phase !== PHASES.LOBBY && this.getPlayerStateForZombieMelee(player) === HUMAN_PLAYER_STATE;
+  }
+
+  canCraft(player) {
+    return this.canMove(player);
+  }
+
+  canAttack(player) {
+    return this.canMove(player);
+  }
+
+  canBeTargetedByEnemies(player, now = Date.now() / 1000) {
+    return this.isPlayerEligibleForZombieMelee(player, now);
+  }
+
+  canProgressObjective(player) {
+    return this.phase === PHASES.NIGHT && this.getPlayerStateForZombieMelee(player) === HUMAN_PLAYER_STATE;
+  }
+
   updatePlayers(dt, now) {
     this.players.forEach((p) => {
       this.updateFlashlightBattery(p, dt);
 
-      const canMove = this.phase !== PHASES.LOBBY;
+      const canMove = this.canMove(p);
       const slow = now < p.taggedUntil ? 0.45 : 1;
       const dx = (p.inputs.right ? 1 : 0) - (p.inputs.left ? 1 : 0);
       const dy = (p.inputs.down ? 1 : 0) - (p.inputs.up ? 1 : 0);
@@ -610,23 +630,23 @@ class Game {
 
       this.updatePlayerSafeZoneState(p);
 
-      if (this.phase !== PHASES.LOBBY && p.wantsCraft) {
+      if (this.canCraft(p) && p.wantsCraft) {
         this.autoCraft(p);
         p.wantsCraft = false;
       }
 
-      if (this.phase !== PHASES.LOBBY && p.wantsFortify) {
+      if (this.canMove(p) && p.wantsFortify) {
         this.handleSafeZoneFortifyIntent(p);
         p.wantsFortify = false;
       }
 
-      if (this.phase !== PHASES.LOBBY && p.wantsWeaponSwap) {
+      if (this.canMove(p) && p.wantsWeaponSwap) {
         const nextWeapon = p.selectedWeapon === 'slingshot' ? 'bat' : 'slingshot';
         this.setSelectedWeapon(p, nextWeapon);
         p.wantsWeaponSwap = false;
       }
 
-      if (this.phase !== PHASES.LOBBY && p.wantsAttack && now >= p.attackCooldownUntil) {
+      if (this.canAttack(p) && p.wantsAttack && now >= p.attackCooldownUntil) {
         this.handleAttack(p, now);
         p.attackCooldownUntil = now + ATTACK_COOLDOWN;
       }
@@ -802,7 +822,7 @@ class Game {
       }
     });
 
-    if (this.phase === PHASES.NIGHT && this.map.tiles[ty][tx] === TILE.OBJECTIVE) {
+    if (this.canProgressObjective(player) && this.map.tiles[ty][tx] === TILE.OBJECTIVE) {
       player.objectiveReached = true;
     }
   }
@@ -1025,7 +1045,7 @@ class Game {
   }
 
   updateEnemies(dt, now) {
-    const targetingContext = this.buildEnemyTargetingContext();
+    const targetingContext = this.buildEnemyTargetingContext(now);
 
     this.enemies.forEach((enemy) => {
       if (enemy.stunnedUntil > now) return;
@@ -1076,7 +1096,7 @@ class Game {
   applyEnemyContactDamage(player, now) {
     // Final melee-resolution eligibility check. This guard prevents accidental regressions where
     // zombie contact damage could hit non-HUMAN states (zombies/spectators/cooldown players).
-    if (!this.isPlayerEligibleForZombieMelee(player, now)) return;
+    if (!this.canBeTargetedByEnemies(player, now)) return;
     if (now < player.enemyContactCooldownUntil || now < player.invulnerableUntil) return;
 
     player.enemyContactCooldownUntil = now + ENEMY_CONTACT_DAMAGE_COOLDOWN;
@@ -1109,11 +1129,12 @@ class Game {
     return this.map.spawns[playerIndex % this.map.spawns.length];
   }
 
-  buildEnemyTargetingContext() {
+  buildEnemyTargetingContext(now = Date.now() / 1000) {
     const unsafePlayers = [];
     const playerBuckets = new Map();
 
     this.players.forEach((player) => {
+      if (!this.canBeTargetedByEnemies(player, now)) return;
       if (this.isPlayerInSafeZone(player)) return;
       unsafePlayers.push(player);
 
@@ -1347,7 +1368,9 @@ class Game {
 
   checkObjectiveWin() {
     if (this.players.size === 0) return;
-    const allSafe = [...this.players.values()].every((p) => p.objectiveReached);
+    const objectivePlayers = [...this.players.values()].filter((p) => this.canProgressObjective(p));
+    if (objectivePlayers.length === 0) return;
+    const allSafe = objectivePlayers.every((p) => p.objectiveReached);
     if (allSafe) {
       this.resetRound(true, Date.now() / 1000);
     }
