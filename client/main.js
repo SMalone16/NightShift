@@ -277,22 +277,25 @@ function shouldRenderPlayerStaminaBar(isSelf, renderForAllPlayers = false) {
   return renderForAllPlayers || isSelf;
 }
 
-function drawOverheadBar(screen, { width, height, yOffset, ratio, fillColor }) {
-  const barX = screen.x - (width / 2);
-  const barY = screen.y + yOffset;
+function drawOverheadBar(screen, zoom, { width, height, yOffset, ratio, fillColor }) {
+  const scaledWidth = pixelsToScreen(width, zoom);
+  const scaledHeight = pixelsToScreen(height, zoom);
+  const scaledYOffset = pixelsToScreen(yOffset, zoom);
+  const barX = screen.x - (scaledWidth / 2);
+  const barY = screen.y + scaledYOffset;
   ctx.fillStyle = 'rgba(15, 20, 26, 0.9)';
-  ctx.fillRect(barX, barY, width, height);
+  ctx.fillRect(barX, barY, scaledWidth, scaledHeight);
   ctx.fillStyle = fillColor;
-  ctx.fillRect(barX, barY, width * ratio, height);
+  ctx.fillRect(barX, barY, scaledWidth * ratio, scaledHeight);
   ctx.strokeStyle = 'rgba(228, 238, 255, 0.45)';
   ctx.lineWidth = 1;
-  ctx.strokeRect(barX, barY, width, height);
+  ctx.strokeRect(barX, barY, scaledWidth, scaledHeight);
 }
 
-function drawPlayerCombatBars(player, screen, isSelf) {
+function drawPlayerCombatBars(player, screen, isSelf, zoom) {
   if (player.health?.max > 0) {
     const healthRatio = clamp((player.health.current || 0) / player.health.max, 0, 1);
-    drawOverheadBar(screen, {
+    drawOverheadBar(screen, zoom, {
       width: 26,
       height: 4,
       yOffset: -22,
@@ -304,7 +307,7 @@ function drawPlayerCombatBars(player, screen, isSelf) {
   const stamina = getPlayerStamina(player);
   if (stamina && shouldRenderPlayerStaminaBar(isSelf)) {
     const staminaRatio = clamp(stamina.current / stamina.max, 0, 1);
-    drawOverheadBar(screen, {
+    drawOverheadBar(screen, zoom, {
       width: 24,
       height: 3,
       yOffset: 18,
@@ -449,30 +452,46 @@ function getMapDimensions(map) {
   };
 }
 
-function getCamera(map, me) {
+function getCameraZoom() {
+  const configuredZoom = Number(snapshot?.cameraZoom ?? snapshot?.zoom ?? 1);
+  if (!Number.isFinite(configuredZoom) || configuredZoom <= 0) return 1;
+  return clamp(configuredZoom, 0.5, 3);
+}
+
+function getCamera(map, me, zoom = 1) {
   const dims = getMapDimensions(map);
   const worldPixelWidth = dims.width * TILE_SIZE;
   const worldPixelHeight = dims.height * TILE_SIZE;
-  const targetX = me.x * TILE_SIZE - canvas.width / 2;
-  const targetY = me.y * TILE_SIZE - canvas.height / 2;
+  const viewportWorldWidth = canvas.width / zoom;
+  const viewportWorldHeight = canvas.height / zoom;
+  const targetX = me.x * TILE_SIZE - viewportWorldWidth / 2;
+  const targetY = me.y * TILE_SIZE - viewportWorldHeight / 2;
 
   return {
-    x: clamp(targetX, 0, Math.max(0, worldPixelWidth - canvas.width)),
-    y: clamp(targetY, 0, Math.max(0, worldPixelHeight - canvas.height)),
+    x: clamp(targetX, 0, Math.max(0, worldPixelWidth - viewportWorldWidth)),
+    y: clamp(targetY, 0, Math.max(0, worldPixelHeight - viewportWorldHeight)),
   };
 }
 
-function worldToScreen(worldX, worldY, camera) {
+function worldToScreen(worldX, worldY, camera, zoom = 1) {
   return {
-    x: worldX * TILE_SIZE - camera.x,
-    y: worldY * TILE_SIZE - camera.y,
+    x: (worldX * TILE_SIZE - camera.x) * zoom,
+    y: (worldY * TILE_SIZE - camera.y) * zoom,
   };
 }
 
-function isOnScreen(screenX, screenY, padding = 0) {
+function worldUnitsToScreen(units, zoom = 1) {
+  return units * TILE_SIZE * zoom;
+}
+
+function pixelsToScreen(pixels, zoom = 1) {
+  return pixels * zoom;
+}
+
+function isOnScreen(screenX, screenY, padding = 0, width = 0, height = width) {
   return (
-    screenX >= -padding
-    && screenY >= -padding
+    screenX + width >= -padding
+    && screenY + height >= -padding
     && screenX <= canvas.width + padding
     && screenY <= canvas.height + padding
   );
@@ -640,7 +659,7 @@ function getEnemyAnimationFramesForState(animState, enemyType = 'zombie') {
   return [];
 }
 
-function drawSafeZones(map, camera, lightingMode) {
+function drawSafeZones(map, camera, lightingMode, zoom) {
   if (!Array.isArray(map.safeZones)) return;
 
   const palette = lightingMode === 'night'
@@ -687,8 +706,9 @@ function drawSafeZones(map, camera, lightingMode) {
       minY = Math.min(minY, tile.y);
       maxY = Math.max(maxY, tile.y);
 
-      const screen = worldToScreen(tile.x, tile.y, camera);
-      if (!isOnScreen(screen.x, screen.y, TILE_SIZE)) return;
+      const screen = worldToScreen(tile.x, tile.y, camera, zoom);
+      const tileSize = worldUnitsToScreen(1, zoom);
+      if (!isOnScreen(screen.x, screen.y, tileSize, tileSize, tileSize)) return;
 
       ctx.save();
       if (zone.destroyed) {
@@ -698,16 +718,16 @@ function drawSafeZones(map, camera, lightingMode) {
       } else {
         ctx.fillStyle = palette.tileFill;
       }
-      ctx.fillRect(screen.x, screen.y, TILE_SIZE, TILE_SIZE);
+      ctx.fillRect(screen.x, screen.y, tileSize, tileSize);
       ctx.fillStyle = zone.destroyed ? palette.destroyedText : palette.text;
       ctx.font = '10px sans-serif';
-      ctx.fillText('SAFE ZONE', screen.x + 2, screen.y + 11);
+      ctx.fillText('SAFE ZONE', screen.x + pixelsToScreen(2, zoom), screen.y + pixelsToScreen(11, zoom));
       if (zone.destroyed) {
         ctx.fillStyle = palette.destroyedText;
-        ctx.fillText('DESTROYED', screen.x + 2, screen.y + 22);
+        ctx.fillText('DESTROYED', screen.x + pixelsToScreen(2, zoom), screen.y + pixelsToScreen(22, zoom));
       } else if (zone.fortified) {
         ctx.fillStyle = palette.fortifiedText;
-        ctx.fillText('FORTIFIED', screen.x + 2, screen.y + 22);
+        ctx.fillText('FORTIFIED', screen.x + pixelsToScreen(2, zoom), screen.y + pixelsToScreen(22, zoom));
       }
       ctx.restore();
     });
@@ -716,16 +736,16 @@ function drawSafeZones(map, camera, lightingMode) {
 
     const centerTileX = (minX + maxX + 1) / 2;
     const centerTileY = (minY + maxY + 1) / 2;
-    const centerScreen = worldToScreen(centerTileX, centerTileY, camera);
-    const zonePixelWidth = Math.max(TILE_SIZE * 2.2, (maxX - minX + 1) * TILE_SIZE * 0.9);
-    const baseBarHeight = Math.max(6, Math.round(TILE_SIZE * 0.24));
-    const armorBarHeight = Math.max(5, Math.round(TILE_SIZE * 0.2));
-    const healthBarY = centerScreen.y - TILE_SIZE * 1.45;
+    const centerScreen = worldToScreen(centerTileX, centerTileY, camera, zoom);
+    const zonePixelWidth = Math.max(worldUnitsToScreen(2.2, zoom), worldUnitsToScreen((maxX - minX + 1) * 0.9, zoom));
+    const baseBarHeight = Math.max(pixelsToScreen(6, zoom), Math.round(worldUnitsToScreen(0.24, zoom)));
+    const armorBarHeight = Math.max(pixelsToScreen(5, zoom), Math.round(worldUnitsToScreen(0.2, zoom)));
+    const healthBarY = centerScreen.y - worldUnitsToScreen(1.45, zoom);
     const armorValue = Number(zone.armor ?? zone.currentArmor ?? zone.fortificationArmor ?? 0);
     const armorMax = Number(zone.maxArmor ?? zone.armorMax ?? zone.fortificationArmorMax ?? 0);
     const hasArmorBar = armorMax > 0 || armorValue > 0;
-    const totalStackHeight = hasArmorBar ? (baseBarHeight + armorBarHeight + 4) : baseBarHeight;
-    if (!isOnScreen(centerScreen.x - zonePixelWidth / 2, healthBarY, zonePixelWidth, totalStackHeight + 2)) return;
+    const totalStackHeight = hasArmorBar ? (baseBarHeight + armorBarHeight + pixelsToScreen(4, zoom)) : baseBarHeight;
+    if (!isOnScreen(centerScreen.x - zonePixelWidth / 2, healthBarY, 0, zonePixelWidth, totalStackHeight + pixelsToScreen(2, zoom))) return;
 
     const maxHits = Math.max(0, Number(zone.maxHits) || 0);
     const remainingHits = clamp(Number(zone.remainingHits) || 0, 0, maxHits || 1);
@@ -746,7 +766,7 @@ function drawSafeZones(map, camera, lightingMode) {
       const safeArmorMax = Math.max(0, armorMax);
       const safeArmor = clamp(armorValue, 0, safeArmorMax || 1);
       const armorRatio = safeArmorMax > 0 ? safeArmor / safeArmorMax : 0;
-      const armorY = healthBarY + baseBarHeight + 4;
+      const armorY = healthBarY + baseBarHeight + pixelsToScreen(4, zoom);
       ctx.fillStyle = palette.barBg;
       ctx.fillRect(centerScreen.x - zonePixelWidth / 2, armorY, zonePixelWidth, armorBarHeight);
       ctx.fillStyle = zone.destroyed ? '#8c6f7a' : palette.armor;
@@ -758,7 +778,7 @@ function drawSafeZones(map, camera, lightingMode) {
   });
 }
 
-function drawZoneOverlay(map, me, camera) {
+function drawZoneOverlay(map, me, camera, zoom) {
   const zone = getCurrentZone(map, me);
   if (!zone) return;
 
@@ -784,17 +804,18 @@ function drawZoneOverlay(map, me, camera) {
   ctx.fillText(hints.length ? hints.join(' • ') : 'Explore to discover nearby zones.', 20, 56);
   ctx.restore();
 
-  if (camera.x <= 8 || camera.y <= 8) {
+  const edgeThreshold = 8;
+  if (camera.x <= edgeThreshold || camera.y <= edgeThreshold) {
     ctx.save();
     ctx.strokeStyle = 'rgba(163, 211, 255, 0.7)';
     ctx.lineWidth = 2;
-    if (camera.x <= 8) {
+    if (camera.x <= edgeThreshold) {
       ctx.beginPath();
       ctx.moveTo(4, canvas.height / 2 - 16);
       ctx.lineTo(4, canvas.height / 2 + 16);
       ctx.stroke();
     }
-    if (camera.y <= 8) {
+    if (camera.y <= edgeThreshold) {
       ctx.beginPath();
       ctx.moveTo(canvas.width / 2 - 16, 4);
       ctx.lineTo(canvas.width / 2 + 16, 4);
@@ -1006,16 +1027,16 @@ function syncLocalLevelUpFx(me) {
   lastServerLevelUpFxUntil = serverFxUntil;
 }
 
-function drawLocalLevelUpEffect(me, camera) {
+function drawLocalLevelUpEffect(me, camera, zoom) {
   const now = performance.now() / 1000;
   if (now >= localLevelUpFxUntil) return;
 
   const duration = 1;
   const progress = clamp(1 - ((localLevelUpFxUntil - now) / duration), 0, 1);
   const fade = 1 - progress;
-  const center = worldToScreen(me.x, me.y, camera);
+  const center = worldToScreen(me.x, me.y, camera, zoom);
 
-  const ringRadius = 18 + progress * 44;
+  const ringRadius = pixelsToScreen(18 + progress * 44, zoom);
   ctx.save();
   ctx.strokeStyle = `rgba(255, 227, 128, ${0.95 * fade})`;
   ctx.lineWidth = 2 + (1 - progress) * 4;
@@ -1026,7 +1047,7 @@ function drawLocalLevelUpEffect(me, camera) {
   ctx.fillStyle = `rgba(255, 236, 168, ${fade})`;
   ctx.font = 'bold 18px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(`LEVEL ${localLevelUpLevel}!`, center.x, center.y - 34 - (progress * 14));
+  ctx.fillText(`LEVEL ${localLevelUpLevel}!`, center.x, center.y - pixelsToScreen(34 + (progress * 14), zoom));
   ctx.textAlign = 'start';
   ctx.restore();
 
@@ -1069,22 +1090,26 @@ function render() {
   const lightingMode = getLightingMode();
   const tileColors = lightingMode === 'night' ? NIGHT_COLORS : DAY_COLORS;
   const grassUnderlayColor = tileColors[TILE.GRASS] || DAY_COLORS[TILE.GRASS];
-  const camera = getCamera(map, cameraAnchor);
+  const zoom = getCameraZoom();
+  const camera = getCamera(map, cameraAnchor, zoom);
   const now = performance.now();
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = grassUnderlayColor;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+  const viewportWorldWidth = canvas.width / zoom;
+  const viewportWorldHeight = canvas.height / zoom;
   const minTileX = Math.max(0, Math.floor(camera.x / TILE_SIZE));
-  const maxTileX = Math.min(map.width - 1, Math.ceil((camera.x + canvas.width) / TILE_SIZE));
+  const maxTileX = Math.min(map.width - 1, Math.ceil((camera.x + viewportWorldWidth) / TILE_SIZE));
   const minTileY = Math.max(0, Math.floor(camera.y / TILE_SIZE));
-  const maxTileY = Math.min(map.height - 1, Math.ceil((camera.y + canvas.height) / TILE_SIZE));
+  const maxTileY = Math.min(map.height - 1, Math.ceil((camera.y + viewportWorldHeight) / TILE_SIZE));
+  const tileScreenSize = worldUnitsToScreen(1, zoom);
 
   for (let y = minTileY; y <= maxTileY; y += 1) {
     for (let x = minTileX; x <= maxTileX; x += 1) {
       const tile = map.tiles[y]?.[x] ?? HIDDEN_TILE;
-      const screen = worldToScreen(x, y, camera);
+      const screen = worldToScreen(x, y, camera, zoom);
 
       const spriteKey = TILE_SPRITE_KEYS[tile];
       const tileSprite = spriteKey ? loadedAssets?.tiles?.[spriteKey] : null;
@@ -1092,52 +1117,53 @@ function render() {
 
       if (tileSprite && !shouldUseBlackout) {
         ctx.fillStyle = grassUnderlayColor;
-        ctx.fillRect(screen.x, screen.y, TILE_SIZE, TILE_SIZE);
-        ctx.drawImage(tileSprite, screen.x, screen.y, TILE_SIZE, TILE_SIZE);
+        ctx.fillRect(screen.x, screen.y, tileScreenSize, tileScreenSize);
+        ctx.drawImage(tileSprite, screen.x, screen.y, tileScreenSize, tileScreenSize);
       } else {
         ctx.fillStyle = tileColors[tile] || '#000';
-        ctx.fillRect(screen.x, screen.y, TILE_SIZE, TILE_SIZE);
+        ctx.fillRect(screen.x, screen.y, tileScreenSize, tileScreenSize);
       }
 
       if (tile === TILE.CHECKPOINT) {
         ctx.fillStyle = 'rgba(180,240,255,0.25)';
-        ctx.fillRect(screen.x, screen.y, TILE_SIZE, TILE_SIZE);
+        ctx.fillRect(screen.x, screen.y, tileScreenSize, tileScreenSize);
       }
     }
   }
 
-  drawSafeZones(map, camera, lightingMode);
+  drawSafeZones(map, camera, lightingMode, zoom);
 
   snapshot.projectiles.forEach((proj) => {
-    const screen = worldToScreen(proj.x, proj.y, camera);
-    if (!isOnScreen(screen.x, screen.y, 12)) return;
+    const screen = worldToScreen(proj.x, proj.y, camera, zoom);
+    if (!isOnScreen(screen.x, screen.y, pixelsToScreen(12, zoom))) return;
     ctx.fillStyle = '#e8e39c';
     ctx.beginPath();
-    ctx.arc(screen.x, screen.y, 4, 0, Math.PI * 2);
+    ctx.arc(screen.x, screen.y, pixelsToScreen(4, zoom), 0, Math.PI * 2);
     ctx.fill();
   });
 
   snapshot.enemies.forEach((enemy) => {
-    const screen = worldToScreen(enemy.x, enemy.y, camera);
-    if (!isOnScreen(screen.x, screen.y, 20)) return;
+    const screen = worldToScreen(enemy.x, enemy.y, camera, zoom);
+    if (!isOnScreen(screen.x, screen.y, pixelsToScreen(20, zoom))) return;
     const stunned = enemy.stunnedUntil > Date.now() / 1000;
     const animState = getEnemyAnimState(enemy, now);
     const frames = getEnemyAnimationFramesForState(animState, enemy.type || 'zombie');
     const sprite = frames.length ? frames[animState.frameIndex % frames.length] : null;
 
     if (sprite) {
-      ctx.drawImage(sprite, screen.x - TILE_SIZE / 2, screen.y - TILE_SIZE / 2, TILE_SIZE, TILE_SIZE);
+      ctx.drawImage(sprite, screen.x - tileScreenSize / 2, screen.y - tileScreenSize / 2, tileScreenSize, tileScreenSize);
     } else {
       ctx.fillStyle = stunned ? '#c47dfa' : '#c53939';
-      ctx.fillRect(screen.x - 10, screen.y - 10, 20, 20);
+      const enemyFallbackSize = pixelsToScreen(20, zoom);
+      ctx.fillRect(screen.x - enemyFallbackSize / 2, screen.y - enemyFallbackSize / 2, enemyFallbackSize, enemyFallbackSize);
     }
 
     if ((enemy.maxHp || 0) > 0) {
       const ratio = clamp((enemy.hp || 0) / enemy.maxHp, 0, 1);
-      const barWidth = 18;
-      const barHeight = 3;
+      const barWidth = pixelsToScreen(18, zoom);
+      const barHeight = pixelsToScreen(3, zoom);
       const barX = screen.x - (barWidth / 2);
-      const barY = screen.y - 16;
+      const barY = screen.y - pixelsToScreen(16, zoom);
       ctx.fillStyle = 'rgba(15, 20, 26, 0.9)';
       ctx.fillRect(barX, barY, barWidth, barHeight);
       ctx.fillStyle = '#88df75';
@@ -1150,25 +1176,27 @@ function render() {
 
   snapshot.players.forEach((player) => {
     const isSelf = player.id === selfId;
-    const screen = worldToScreen(player.x, player.y, camera);
-    if (!isOnScreen(screen.x, screen.y, 24)) return;
+    const screen = worldToScreen(player.x, player.y, camera, zoom);
+    if (!isOnScreen(screen.x, screen.y, pixelsToScreen(24, zoom))) return;
 
     const animState = getPlayerAnimState(player, now);
     const frames = getAnimationFramesForState(animState, player.character);
     const sprite = frames.length ? frames[animState.frameIndex % frames.length] : null;
     if (sprite) {
-      ctx.drawImage(sprite, screen.x - TILE_SIZE / 2, screen.y - TILE_SIZE / 2, TILE_SIZE, TILE_SIZE);
+      ctx.drawImage(sprite, screen.x - tileScreenSize / 2, screen.y - tileScreenSize / 2, tileScreenSize, tileScreenSize);
     } else {
       ctx.fillStyle = isSelf ? '#4ec3ff' : '#f7f7f7';
       if (player.tagged) ctx.fillStyle = '#ffb26a';
-      ctx.fillRect(screen.x - 9, screen.y - 9, 18, 18);
+      const playerFallbackSize = pixelsToScreen(18, zoom);
+      ctx.fillRect(screen.x - playerFallbackSize / 2, screen.y - playerFallbackSize / 2, playerFallbackSize, playerFallbackSize);
     }
 
     const dirX = player.facingX ?? 1;
     const dirY = player.facingY ?? 0;
     const mag = Math.hypot(dirX, dirY) || 1;
-    const tipX = screen.x + (dirX / mag) * 14;
-    const tipY = screen.y + (dirY / mag) * 14;
+    const tipDistance = pixelsToScreen(14, zoom);
+    const tipX = screen.x + (dirX / mag) * tipDistance;
+    const tipY = screen.y + (dirY / mag) * tipDistance;
     ctx.strokeStyle = isSelf ? '#004d73' : '#333';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -1176,15 +1204,15 @@ function render() {
     ctx.lineTo(tipX, tipY);
     ctx.stroke();
 
-    drawPlayerCombatBars(player, screen, isSelf);
+    drawPlayerCombatBars(player, screen, isSelf, zoom);
 
     ctx.fillStyle = '#10151d';
     ctx.font = '12px sans-serif';
-    ctx.fillText(player.username, screen.x - 20, screen.y - 12);
+    ctx.fillText(player.username, screen.x - pixelsToScreen(20, zoom), screen.y - pixelsToScreen(12, zoom));
   });
 
   if (!localIsSpectator) {
-    drawLocalLevelUpEffect(me, camera);
+    drawLocalLevelUpEffect(me, camera, zoom);
   }
 
   if (lightingMode === 'night' && snapshot.visionRadius) {
@@ -1192,8 +1220,8 @@ function render() {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    const center = worldToScreen(cameraAnchor.x, cameraAnchor.y, camera);
-    const radiusPx = snapshot.visionRadius * TILE_SIZE;
+    const center = worldToScreen(cameraAnchor.x, cameraAnchor.y, camera, zoom);
+    const radiusPx = worldUnitsToScreen(snapshot.visionRadius, zoom);
     const gradient = ctx.createRadialGradient(
       center.x,
       center.y,
@@ -1218,7 +1246,7 @@ function render() {
   } else {
     if (!localIsSpectator) {
       drawGameplayHud(me, lightingMode);
-      drawZoneOverlay(map, me, camera);
+      drawZoneOverlay(map, me, camera, zoom);
     }
   }
 
