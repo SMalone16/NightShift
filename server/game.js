@@ -227,7 +227,8 @@ class Game {
       selectedWeapon: 'bat',
       inventory: makeEmptyInventory(),
       gear: makeGear(),
-      stats: computePlayerStats(profile.level, makeGear()),
+      roundCombatLevel: 1,
+      stats: computePlayerStats(1, makeGear()),
       combat: makeCombatState(),
       health: makeHealthState(),
       taggedUntil: 0,
@@ -238,8 +239,8 @@ class Game {
       lastAttackAt: 0,
       lastAttackType: null,
       objectiveReached: false,
-      xp: profile.xp,
-      level: profile.level,
+      profileXp: profile.xp,
+      profileLevel: profile.level,
       xpEarned: {
         survival: 0,
         zombieHit: 0,
@@ -253,7 +254,7 @@ class Game {
     this.syncPlayerHealthWithStats(player, { refill: true });
     this.players.set(clientId, player);
     this.startLobbyOnFirstPlayer();
-    touchUser(username, { xp: player.xp, level: player.level, character: player.character });
+    touchUser(username, { xp: player.profileXp, level: player.profileLevel, character: player.character });
     this.logEvent(`${username} joined the shift.`);
     return player;
   }
@@ -270,7 +271,7 @@ class Game {
   removePlayer(clientId) {
     const player = this.players.get(clientId);
     if (!player) return;
-    touchUser(player.username, { xp: player.xp, level: player.level, character: player.character });
+    touchUser(player.username, { xp: player.profileXp, level: player.profileLevel, character: player.character });
     this.players.delete(clientId);
     this.maskedMapCache.delete(clientId);
     this.logEvent(`${player.username} signed off.`);
@@ -390,17 +391,18 @@ class Game {
       p.x = s.x;
       p.y = s.y;
       p.objectiveReached = false;
+      p.roundCombatLevel = 1;
       p.taggedUntil = now;
       p.enemyContactCooldownUntil = 0;
       p.invulnerableUntil = now;
-      this.syncPlayerHealthWithStats(p, { refill: true });
+      this.recomputePlayerStats(p, { refillHealth: true });
       p.safeZoneState = { entranceZoneId: null, activeZoneId: null };
       i += 1;
     });
   }
 
   recomputePlayerStats(player, { refillHealth = false } = {}) {
-    player.stats = computePlayerStats(player.level, player.gear);
+    player.stats = computePlayerStats(player.roundCombatLevel, player.gear);
     this.syncPlayerHealthWithStats(player, { refill: refillHealth });
   }
 
@@ -432,9 +434,8 @@ class Game {
     if (success) {
       this.players.forEach((p) => {
         const updated = addXp(p.username, 30);
-        p.xp = updated.xp;
-        p.level = updated.level;
-        this.recomputePlayerStats(p);
+        p.profileXp = updated.xp;
+        p.profileLevel = updated.level;
       });
       this.logEvent('Round success! Team extracted and gained XP.');
     } else {
@@ -1334,14 +1335,13 @@ class Game {
 
   rewardXp(player, amount, { category = null } = {}) {
     const updated = addXp(player.username, amount);
-    const oldLevel = player.level;
+    const oldLevel = player.profileLevel;
     const now = Date.now() / 1000;
-    player.xp = updated.xp;
-    player.level = updated.level;
-    const newLevel = player.level;
+    player.profileXp = updated.xp;
+    player.profileLevel = updated.level;
+    const newLevel = player.profileLevel;
     if (oldLevel !== newLevel) {
       player.levelUpFxUntil = now + 1.0;
-      this.recomputePlayerStats(player);
       this.logEvent(`${player.username} leveled up to ${newLevel}!`);
     }
 
@@ -1482,8 +1482,11 @@ class Game {
           lastAttackAt: p.lastAttackAt,
           lastAttackType: p.lastAttackType,
           objectiveReached: p.objectiveReached,
-          xp: p.xp,
-          level: p.level,
+          profileXp: p.profileXp,
+          profileLevel: p.profileLevel,
+          combatLevel: p.roundCombatLevel,
+          xp: p.profileXp,
+          level: p.profileLevel,
           xpEarned: p.xpEarned,
           levelUpFxUntil: (!player || p.id === player.id) ? p.levelUpFxUntil : 0,
         })),
